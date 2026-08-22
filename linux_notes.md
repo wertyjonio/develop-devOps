@@ -266,3 +266,83 @@ done
 3. **Контроль состояния и чтение логов:**
    `sudo systemctl status my-app.service` — аудит текущего состояния службы (показывает статус `active (running)`, выделенный `PID` и потребление ресурсов).
    `journalctl -u my-app.service -f` — вызов централизованного сборщика логов. Флаг `-f` (follow) фиксирует терминал и выводит логи приложения в режиме реального времени.
+ ### 13. Сетевые команды
+
+ 🌐 Сетевые команды #
+Диагностика сетевых подключений #
+# Проверка подключения
+ping google.com            # проверить доступность хоста
+ping -c 4 8.8.8.8         # отправить 4 пакета
+
+# Трассировка маршрута
+traceroute google.com      # показать маршрут до хоста
+mtr google.com            # непрерывная трассировка
+
+# DNS запросы
+nslookup google.com        # получить IP адрес
+dig google.com            # подробная DNS информация
+host google.com           # простой DNS lookup
+Сетевые подключения и порты #
+# Показать активные подключения
+netstat -tulpn             # все слушающие порты
+netstat -an | grep :80     # кто использует порт 80
+ss -tulpn                  # современная замена netstat
+
+# Проверка портов
+telnet localhost 22        # проверить доступность порта
+nc -zv hostname 22         # проверить порт через netcat
+
+# Скачивание файлов
+wget https://example.com/file.zip          # скачать файл
+curl -O https://example.com/file.zip       # альтернатива wget
+curl -s https://api.github.com/users/octocat # API запрос
+
+ ### 14. Мониторинг ресурсов
+ пример скрипта для мониторинга ресурсов:
+ #!/bin/bash
+
+# monitor.sh - простой мониторинг системы
+
+LOG_FILE="/var/log/monitor.log"
+THRESHOLD_CPU=80
+THRESHOLD_MEMORY=80
+THRESHOLD_DISK=90
+
+log_message() {
+    echo "$(date '+%Y-%m-%d %H:%M:%S') - $1" >> "$LOG_FILE"
+}
+
+check_cpu() {
+    CPU_USAGE=$(top -bn1 | grep "Cpu(s)" | awk '{print $2}' | awk -F'%' '{print $1}')
+    if (( $(echo "$CPU_USAGE > $THRESHOLD_CPU" | bc -l) )); then
+        log_message "WARNING: High CPU usage: ${CPU_USAGE}%"
+        # Отправить алерт
+        echo "High CPU usage: ${CPU_USAGE}%" | mail -s "CPU Alert" admin@company.com
+    fi
+}
+
+check_memory() {
+    MEMORY_USAGE=$(free | grep Mem | awk '{printf("%.1f", $3/$2 * 100.0)}')
+    if (( $(echo "$MEMORY_USAGE > $THRESHOLD_MEMORY" | bc -l) )); then
+        log_message "WARNING: High memory usage: ${MEMORY_USAGE}%"
+    fi
+}
+
+check_disk() {
+    df -h | grep -vE '^Filesystem|tmpfs|cdrom' | awk '{print $5 " " $1}' | while read output;
+    do
+        usage=$(echo $output | awk '{print $1}' | cut -d'%' -f1)
+        partition=$(echo $output | awk '{print $2}')
+        
+        if [ $usage -ge $THRESHOLD_DISK ]; then
+            log_message "WARNING: High disk usage on $partition: ${usage}%"
+        fi
+    done
+}
+
+# Основная логика
+log_message "Starting system monitoring"
+check_cpu
+check_memory  
+check_disk
+log_message "Monitoring completed"
