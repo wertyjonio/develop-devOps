@@ -1,7 +1,7 @@
 #!/bin/bash
 SOURCE_DIR="/data/src"
 BACKUP_DIR="/data/backups"
-TIMESTAMP=$(date + "%Y-%m-%d-%H-%M-%S")
+TIMESTAMP=$(date +"%Y-%m-%d_%H-%M-%S")
 ARCHIVE_NAME="backup_$TIMESTAMP.tar.gz"
 if [ ! -d $SOURCE_DIR ]; then
 	echo "ERROR, папки с данными нет"
