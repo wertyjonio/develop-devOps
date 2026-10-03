@@ -5,12 +5,15 @@ const { createClient } = require("redis");
 const PORT = Number(process.env.PORT) || 3000;
 const REDIS_HOST = process.env.REDIS_HOST || "localhost";
 const REDIS_PORT = Number(process.env.REDIS_PORT) || 6379;
+// Пароль от Redis (если не задан, клиент подключается без пароля)
+const REDIS_PASSWORD = process.env.REDIS_PASSWORD || undefined;
 
 const MESSAGES_KEY = "messages";
 const MAX_MESSAGES = 50;
 
 const redis = createClient({
   socket: { host: REDIS_HOST, port: REDIS_PORT },
+  password: REDIS_PASSWORD,
   // если Redis недоступен, команды сразу падают с ошибкой, а не висят в очереди
   disableOfflineQueue: true,
 });
