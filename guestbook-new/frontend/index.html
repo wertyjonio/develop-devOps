@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Гостевая книга</title>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <h1>Гостевая книга</h1>
+      <nav>
+        <a href="/" data-link>Книга</a>
+        <a href="/about" data-link>О проекте</a>
+      </nav>
+      <div class="sub">
+        <span>Визитов: <strong id="visits">–</strong></span>
+        <span>Сообщений: <strong id="count">–</strong></span>
+        <span><span id="dot" class="dot"></span><span id="health">проверка…</span></span>
+      </div>
+    </header>
+
+    <main>
+      <!-- Страница "/" -->
+      <section id="view-home" hidden>
+        <div class="card">
+          <form id="form">
+            <input id="name" placeholder="Ваше имя" maxlength="30" required>
+            <textarea id="text" placeholder="Оставьте сообщение…" maxlength="300" required></textarea>
+            <div class="row">
+              <span class="hint" id="left">300</span>
+              <button id="send" type="submit">Отправить</button>
+            </div>
+          </form>
+          <div id="form-error"></div>
+        </div>
+        <div id="messages"></div>
+      </section>
+
+      <!-- Страница "/about" -->
+      <section id="view-about" hidden>
+        <div class="card">
+          <h2>О проекте</h2>
+          <p>Учебный проект для практики Docker и Docker Compose.</p>
+          <p>Путь запроса: браузер → Nginx → API на Node.js → Redis.</p>
+          <p>Эта страница существует только в JavaScript: на диске файла <code>about</code> нет, поэтому прямое открытие адреса <code>/about</code> работает только при правильной настройке Nginx.</p>
+        </div>
+      </section>
+
+      <!-- Любой другой адрес -->
+      <section id="view-404" hidden>
+        <div class="card">
+          <h2>Страница не найдена</h2>
+          <p><a href="/" data-link>Вернуться к гостевой книге</a></p>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>
