@@ -1,0 +1,50 @@
+name:   guestbook-ci
+
+on:
+  push:
+    branches: [main]
+    paths: ["guestbook-new/**"]
+  pull_request:
+    paths: ["guestbook-new/**"]
+  workflow_dispatch:
+
+jobs:
+  lint-and-build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: guestbook-new
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Lint Dockerfile (api)
+        uses: hadolint/hadolint-action@3.1.0
+        with: 
+          dockerfile: guestbook-new/api/Dockerfile
+
+      - name: Lint Dockerfile (frontend)
+        uses: hadolint/hadolint-action@3.1.0
+        with: 
+          dockerfile: guestbook-new/frontend/Dockerfile
+
+      - name: Prepare .env
+        run: cp .env.example .env
+
+      - name: Validate compose file
+        run: docker compose config > dev/null  
+
+      - name: Build image
+        run: docker compose build
+
+      - name: Smoke test
+        run: |
+          docker compose up -d --wait
+          curl -f --retry 10 --retry-connrefused --retry-delay 2 http://localhost:8081/api/health
+
+      - name: Show logs on failure
+        if: failure()
+        run: docker compose logs
+
+      - name: Cleanup
+        if: always()
+        run: docker compose down -v
