@@ -11,5 +11,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: echo "Привет из CI, коммит ${GITHUB_SHA::7}"
+      - run: exit 1
       - run: ls -la
       - run: docker --version
