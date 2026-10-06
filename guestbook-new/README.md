@@ -1,5 +1,7 @@
 # Guestbook: Vite + Node.js + Redis with Docker Compose
 
+[![guestbook-ci](https://github.com/wertyjonio/develop-devOps/actions/workflows/guestbook-ci.yml/badge.svg)](https://github.com/wertyjonio/develop-devOps/actions/workflows/guestbook-ci.yml)
+
 A small multi-container web app built to practice Docker and Docker Compose. Visitors can leave messages in a guestbook; the page also shows a visit counter and the live health of the backend.
 
 It runs three containers:
