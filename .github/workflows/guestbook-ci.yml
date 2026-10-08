@@ -69,8 +69,8 @@ jobs:
           context: guestbook-new/api
           push: true
           tags: |
-            ghrc.io/${{ github.repository_owner }}/guestbook-api:latest
-            ghrc.io/${{ github.repository_owner }}/guestbook-api:${{ github.sha }}
+            ghcr.io/${{ github.repository_owner }}/guestbook-api:latest
+            ghcr.io/${{ github.repository_owner }}/guestbook-api:${{ github.sha }}
           labels: |
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
 
