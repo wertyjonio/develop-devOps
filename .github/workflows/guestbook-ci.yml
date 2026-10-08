@@ -48,3 +48,41 @@ jobs:
       - name: Cleanup
         if: always()
         run: docker compose down -v
+  publish:
+    needs: lint-and-build
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read 
+      packages: write
+    steps:
+      - uses: actions/checkout@7
+
+      - uses: docker/login-action@4
+        with:
+          registry: ghrc.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+        
+      - name: Build and push api image
+        uses: docker/build-push-action@7
+        with:
+          context: guestbook-new/api
+          push: true
+          tags: |
+            ghrc.io/${{ github.repository_owner }}/guestbook-api:latest
+            ghrc.io/${{ github.repository_owner }}/guestbook-api:${{ github.sha }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+
+      - name: Build and push frontend image
+        uses: docker/build-push-action@7
+        with:
+          context: guestbook-new/frontend
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/guestbook-frontend:latest
+            ghcr.io/${{ github.repository_owner }}/guestbook-frontend:${{ github.sha }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            
