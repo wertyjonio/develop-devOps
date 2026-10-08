@@ -50,7 +50,7 @@ jobs:
         run: docker compose down -v
   publish:
     needs: lint-and-build
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
       contents: read 
@@ -85,4 +85,4 @@ jobs:
             ghcr.io/${{ github.repository_owner }}/guestbook-frontend:${{ github.sha }}
           labels: |
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
-            
+
