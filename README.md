@@ -48,8 +48,11 @@ The `guestbook-ci` workflow runs on every push and pull request that touches `gu
 3. **Build** all images.
 4. **Smoke test:** start the whole stack and check `/api/health` through Nginx.
 5. Print container logs on failure and always clean up.
+6. **Publish** (only on pushes to `main`, after all checks pass): build the images and push them to GitHub Container Registry, tagged `latest` and with the commit SHA.
 
-No real secrets are used in CI: the pipeline runs with the template values from `.env.example`.
+A separate `security` workflow scans the full git history for leaked secrets with [gitleaks](https://github.com/gitleaks/gitleaks) on every push and pull request.
+
+No real secrets are used in CI: the checks run with the template values from `.env.example`, and publishing uses the built-in short-lived `GITHUB_TOKEN` with minimal permissions.
 
 ## Skills practiced so far
 
@@ -57,7 +60,7 @@ No real secrets are used in CI: the pipeline runs with the template values from 
 - **Containers:** Dockerfiles, multi-stage builds, Docker Compose, networks, volumes, healthchecks, Docker Hub
 - **Data stores:** PostgreSQL and Redis in containers, persistent volumes
 - **Web:** Nginx as a static server and reverse proxy
-- **CI:** GitHub Actions workflows, path filters, job dependencies, reading and fixing failing pipelines
+- **CI:** GitHub Actions workflows, path filters, job dependencies, publishing images to GHCR, secret scanning, reading and fixing failing pipelines
 - **Deployment:** deploying a container image to a cloud platform (Render)
 - **Security hygiene:** keeping secrets out of Git, GitHub push protection, least-privilege setups
 
@@ -65,7 +68,7 @@ No real secrets are used in CI: the pipeline runs with the template values from 
 
 - [x] Docker and Docker Compose fundamentals
 - [x] CI with GitHub Actions (lint, build, smoke test)
-- [ ] Publish images to GitHub Container Registry
+- [x] Publish images to GitHub Container Registry
 - [ ] Secret scanning (gitleaks) and image vulnerability scanning (Trivy) in CI
 - [ ] Run containers as a non-root user
 - [ ] Deploy to a VPS with a domain and HTTPS (Caddy)
