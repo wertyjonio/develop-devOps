@@ -94,7 +94,7 @@ jobs:
         run: docker build -t guestbook-api:scan guestbook-new/api
 
       - name: Scan api image
-        uses: aquasecurity/trivy-actions@v0.36.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: guestbook-api:scan
           severity: CRITICAL,HIGH
@@ -105,7 +105,7 @@ jobs:
         run: docker build -t guestbook-frontend:scan guestbook-new/frontend
 
       - name: Scan frontend image
-        uses: aquasecurity/trivy-actions@v0.36.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: guestbook-frontend:scan
           severity: CRITICAL,HIGH
