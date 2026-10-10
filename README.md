@@ -48,7 +48,8 @@ The `guestbook-ci` workflow runs on every push and pull request that touches `gu
 3. **Build** all images.
 4. **Smoke test:** start the whole stack and check `/api/health` through Nginx.
 5. Print container logs on failure and always clean up.
-6. **Publish** (only on pushes to `main`, after all checks pass): build the images and push them to GitHub Container Registry, tagged `latest` and with the commit SHA.
+6. **Scan** the built images with [Trivy](https://github.com/aquasecurity/trivy): fixable HIGH and CRITICAL vulnerabilities fail the pipeline.
+7. **Publish** (only on pushes to `main`, after all checks pass): build the images and push them to GitHub Container Registry, tagged `latest` and with the commit SHA.
 
 A separate `security` workflow scans the full git history for leaked secrets with [gitleaks](https://github.com/gitleaks/gitleaks) on every push and pull request.
 
@@ -69,7 +70,7 @@ No real secrets are used in CI: the checks run with the template values from `.e
 - [x] Docker and Docker Compose fundamentals
 - [x] CI with GitHub Actions (lint, build, smoke test)
 - [x] Publish images to GitHub Container Registry
-- [ ] Secret scanning (gitleaks) and image vulnerability scanning (Trivy) in CI
+- [x] Secret scanning (gitleaks) and image vulnerability scanning (Trivy) in CI
 - [ ] Run containers as a non-root user
 - [ ] Deploy to a VPS with a domain and HTTPS (Caddy)
 - [ ] Automate server setup with Ansible
