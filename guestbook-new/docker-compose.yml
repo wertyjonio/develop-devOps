@@ -10,14 +10,14 @@ networks:
 
 services:
   redis:
-    user: "999:999"
-    cap_drop: [ALL]
     image: redis:7.4-alpine
     restart: unless-stopped
+    user: "999:999"
     networks: [backend]
     mem_limit: 256m
     cpus: 0.5
     logging: *default-logging
+    cap_drop: [ALL]
     security_opt:
       - no-new-privileges:true
     read_only: true
@@ -27,13 +27,13 @@ services:
     environment:
       REDIS_PASSWORD: ${REDIS_PASSWORD}
     healthcheck:
-      test: ["CMD-SHELL", "redis-cli -a $$REDIS_PASSWORD --no-auth-warning ping | grep PONG"]     
+      test: ["CMD-SHELL", "redis-cli -a $$REDIS_PASSWORD --no-auth-warning ping | grep -q PONG"]
       interval: 5s
-      timeout: 3s 
+      timeout: 3s
       retries: 5
+      start_period: 5s
 
   api:
-    cap_drop: [ALL]
     build: ./api
     restart: unless-stopped
     init: true
@@ -41,6 +41,7 @@ services:
     mem_limit: 256m
     cpus: 0.5
     logging: *default-logging
+    cap_drop: [ALL]
     security_opt:
       - no-new-privileges:true
     read_only: true
@@ -59,23 +60,23 @@ services:
         condition: service_healthy
 
   frontend:
-    cap_drop: [ALL]
     build: ./frontend
     restart: unless-stopped
     networks: [edge]
     mem_limit: 256m
     cpus: 0.5
     logging: *default-logging
+    cap_drop: [ALL]
     security_opt:
-      - no-new-priviledges:true
+      - no-new-privileges:true
     read_only: true
     tmpfs:
       - /tmp
     ports:
-      - "${BIND_ADDR:-127.0.0.1}:8081:8080" 
+      - "${BIND_ADDR:-127.0.0.1}:8081:8080"
     depends_on:
       api:
         condition: service_healthy
+
 volumes:
   redis-data:
-
