@@ -1,7 +1,26 @@
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+networks:
+  edge:
+  backend:
+
 services:
   redis:
-    image: redis:7-alpine
+    user: "999:999"
+    cap_drop: [ALL]
+    image: redis:7.4-alpine
     restart: unless-stopped
+    networks: [backend]
+    mem_limit: 256m
+    cpus: 0.5
+    logging: *default-logging
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
     volumes:
       - redis-data:/data
     command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:?REDIS_PASSWORD is not set}
@@ -14,21 +33,49 @@ services:
       retries: 5
 
   api:
+    cap_drop: [ALL]
     build: ./api
     restart: unless-stopped
+    init: true
+    networks: [edge, backend]
+    mem_limit: 256m
+    cpus: 0.5
+    logging: *default-logging
+    security-opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp
     env_file:
       - .env
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:$${PORT:-3000}/health > /dev/null || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
     depends_on:
       redis:
         condition: service_healthy
 
   frontend:
+    cap_drop: [ALL]
     build: ./frontend
     restart: unless-stopped
+    networks: [edge]
+    mem_limit: 256m
+    cpus: 0.5
+    logging: *default-logging
+    security_opt:
+      - no-new-priviledges:true
+    read_only: true
+    tmpfs:
+      - /tmp
     ports:
-      - "8081:8080"
+      - "${BIND_ADDR:-127.0.0.1}:8081:8080" 
     depends_on:
-      - api
+      api:
+        condition: service_healthy
 volumes:
   redis-data:
 
