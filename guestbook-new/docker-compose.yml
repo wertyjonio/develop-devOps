@@ -41,7 +41,7 @@ services:
     mem_limit: 256m
     cpus: 0.5
     logging: *default-logging
-    security-opt:
+    security_opt:
       - no-new-privileges:true
     read_only: true
     tmpfs:
