@@ -28,6 +28,7 @@ browser ──> frontend (nginx) ──/api/──> api (node :3000) ──> red
 - Nginx serves the SPA (with a fallback for client-side routes) and acts as a reverse proxy for the API.
 - Redis is password-protected, uses AOF persistence and a named volume, and is not reachable from outside the Compose network.
 - Startup order is driven by healthchecks, not just container start.
+- Hardened containers: non-root users, all Linux capabilities dropped, read-only filesystems, memory and CPU limits, log rotation, and two isolated networks so the frontend cannot reach Redis.
 - Secrets live in `.env` (git-ignored); a safe `.env.example` template is committed.
 
 Run it locally:
@@ -59,6 +60,7 @@ No real secrets are used in CI: the checks run with the template values from `.e
 
 - **Linux:** shell scripting, processes and signals, systemd services and timers, networking, SSH and firewall hardening
 - **Containers:** Dockerfiles, multi-stage builds, Docker Compose, networks, volumes, healthchecks, Docker Hub
+- **Container hardening:** non-root users, dropped capabilities, read-only filesystems, resource limits, network segmentation, image vulnerability scanning
 - **Data stores:** PostgreSQL and Redis in containers, persistent volumes
 - **Web:** Nginx as a static server and reverse proxy
 - **CI:** GitHub Actions workflows, path filters, job dependencies, publishing images to GHCR, secret scanning, reading and fixing failing pipelines
@@ -71,7 +73,7 @@ No real secrets are used in CI: the checks run with the template values from `.e
 - [x] CI with GitHub Actions (lint, build, smoke test)
 - [x] Publish images to GitHub Container Registry
 - [x] Secret scanning (gitleaks) and image vulnerability scanning (Trivy) in CI
-- [ ] Run containers as a non-root user
+- [x] Run containers as a non-root user
 - [ ] Deploy to a VPS with a domain and HTTPS (Caddy)
 - [ ] Automate server setup with Ansible
 - [ ] Provision infrastructure with Terraform
