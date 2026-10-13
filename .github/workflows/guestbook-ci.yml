@@ -7,10 +7,7 @@ on:
       - "guestbook-new/**"
       - ".github/workflows/guestbook-ci.yml"
   pull_request:
-    paths:
-      - "guestbook-new/**"
-      - ".github/workflows/guestbook-ci.yml"
-
+  workflow_dispatch:
 jobs:
   lint-and-build:
     runs-on: ubuntu-latest
