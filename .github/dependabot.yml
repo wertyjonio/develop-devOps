@@ -1,0 +1,32 @@
+version: 2
+updates: 
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+
+  - package-ecosystem: "docker"
+    directory: "/guestbook-new/api"
+    schedule:
+      interval: "weekly"
+    
+  - package-ecosystem: "docker"
+    directory: "/guestbook-new/frontend"
+    schedule:   
+      interval: "weekly"
+    
+  - package-ecosystem: "docker-compose"
+    directory: "/guestbook-new"
+    schedule:
+      interval: "weekly"
+
+  - package-ecosystem: "npm"
+    directory: "/guestbook/api"
+    schedule:
+      interval: "weekly"
+
+  - package-ecosystem: "npm"
+    directory: "/guestbook/frontend"
+    schedule:
+      interval: "weekly"
+      
