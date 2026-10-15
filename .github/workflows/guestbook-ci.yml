@@ -8,6 +8,7 @@ on:
       - ".github/workflows/guestbook-ci.yml"
   pull_request:
   workflow_dispatch:
+  
 jobs:
   lint-and-build:
     runs-on: ubuntu-latest
