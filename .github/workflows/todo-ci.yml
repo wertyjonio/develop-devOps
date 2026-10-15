@@ -1,0 +1,46 @@
+name: todo-ci
+
+on: 
+  push: 
+    branches: [main]
+    paths:  
+      - "archive_projects/docker-compose2/**"
+      - ".github/workflows/todo-ci.yml"
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  lint-and-build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:  
+        working-directory: "archive_projects/docker-compose2"
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Lint Dockerfile
+        uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: "archive_projects/docker-compose2/app/Dockerfile"
+
+      - name: Prepare .env
+        run: cp .env.example .env
+
+      - name: Validate compose file
+        run: docker compose config > /dev/null/
+
+      - name: Build image
+        run: docker compose build
+
+      - name: Smoke test
+        run: |
+          docker compose up -d --wait
+          curl -f --retry 10 --retry-connrefused -retry-delay 2 http://localhosthost:5000/health
+      
+      - name: Show logs
+        if: failure()
+        run: docker compose logs
+
+      - name: Cleanup
+        if: always()
+        run: docker compose down -v
