@@ -35,7 +35,7 @@ jobs:
       - name: Smoke test
         run: |
           docker compose up -d --wait
-          curl -f --retry 10 --retry-connrefused -retry-delay 2 http://localhost:5000/health
+          curl -f --retry 10 --retry-connrefused -retry-delay 2 http://127.0.0.1:5000/health
       
       - name: Show logs
         if: failure()
