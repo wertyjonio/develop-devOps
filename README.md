@@ -3,14 +3,16 @@
 My hands-on DevOps learning lab: containerized projects, CI pipelines, systemd automation and a personal Linux/Docker reference. I'm learning DevOps by building things, breaking them and writing down what I figure out.
 
 [![guestbook-ci](https://github.com/wertyjonio/develop-devOps/actions/workflows/guestbook-ci.yml/badge.svg)](https://github.com/wertyjonio/develop-devOps/actions/workflows/guestbook-ci.yml)
+[![todo-ci](https://github.com/wertyjonio/develop-devOps/actions/workflows/todo-ci.yml/badge.svg)](https://github.com/wertyjonio/develop-devOps/actions/workflows/todo-ci.yml)
+[![security](https://github.com/wertyjonio/develop-devOps/actions/workflows/security.yml/badge.svg)](https://github.com/wertyjonio/develop-devOps/actions/workflows/security.yml)
 
 ## Projects
 
 | Project | What it demonstrates | Stack |
 |---------|----------------------|-------|
-| **[Guestbook](guestbook-new/)** (main project) | Three-container app behind a reverse proxy: multi-stage builds, healthchecks, internal-only services, persistent storage, CI pipeline | Vite, Node.js/Express, Redis, Nginx, Docker Compose, GitHub Actions |
+| **[Guestbook](guestbook-new/)** (main project) | Three-container app behind a reverse proxy: multi-stage builds, healthchecks, internal-only services, persistent storage, hardened containers, CI pipeline with image publishing | Vite, Node.js/Express, Redis, Nginx, Docker Compose, GitHub Actions |
+| **[Todo API](archive_projects/docker-compose2/)** | REST API with a database, startup ordering via healthchecks, config kept out of code (`.env`), layer caching, CI with a smoke test | Flask, PostgreSQL 16, Docker Compose, GitHub Actions |
 | **[Guestbook v1](archive_projects/docker_compose_frontend/)** | Earlier iteration of the guestbook: static HTML frontend on Nginx, Node.js API, Redis with AOF persistence and healthchecks. Superseded by the main version above (multi-stage build, Redis password, SPA routing) | Nginx, Node.js/Express, Redis, Docker Compose |
-| **[Todo API](archive_projects/docker-compose2/)** | REST API with a database, startup ordering via healthchecks, config kept out of code (`.env`), layer caching | Flask, PostgreSQL 16, Docker Compose |
 | **[Smart Backup](archive_projects/smart-backup/)** | Backup utility in a minimal Alpine container, run on a schedule by a systemd service and timer (`Persistent=true`), host folders mounted as volumes | Bash, Docker, systemd |
 | **[Catnip](archive_projects/flask-app2/)** | Packaging a small Flask app as a custom image, publishing it to Docker Hub and deploying it to a cloud platform | Flask, Docker, Docker Hub, Render |
 | [`linux_notes.md`](linux_notes.md) | Personal reference: Git, Linux, networking, systemd, hardening, Docker (in Russian) | Markdown |
@@ -40,9 +42,19 @@ docker compose up -d --build
 # open http://localhost:8081
 ```
 
-## CI pipeline
+## CI/CD and automation
 
-The `guestbook-ci` workflow runs on every push and pull request that touches `guestbook-new/`:
+All workflows live in [`.github/workflows/`](.github/workflows/). Project workflows use path filters, so a change in one project does not trigger the pipelines of the others.
+
+| Workflow | Trigger | What it does |
+|----------|---------|--------------|
+| **guestbook-ci** | push to `main` and pull requests touching `guestbook-new/` | Lint (hadolint), validate Compose, build, smoke test through Nginx, Trivy image scan, publish to GHCR on `main` |
+| **todo-ci** | push to `main` and pull requests touching `archive_projects/docker-compose2/` | Lint (hadolint), validate Compose, build, smoke test on `/health` (checks the app and PostgreSQL together), logs on failure, cleanup |
+| **security** | every push and pull request | Scans the full git history for leaked secrets with gitleaks |
+| **schedule-scan** | weekly (Monday, cron) and manually | Rebuilds the Guestbook images and scans them with Trivy, so new CVEs in base images are found even without code changes |
+| **Dependabot** | weekly | Opens pull requests with updates for GitHub Actions, Docker base images and dependencies |
+
+### Guestbook pipeline in detail
 
 1. **Lint** both Dockerfiles with [hadolint](https://github.com/hadolint/hadolint).
 2. **Validate** the Compose file (`docker compose config`).
@@ -50,11 +62,13 @@ The `guestbook-ci` workflow runs on every push and pull request that touches `gu
 4. **Smoke test:** start the whole stack and check `/api/health` through Nginx.
 5. Print container logs on failure and always clean up.
 6. **Scan** the built images with [Trivy](https://github.com/aquasecurity/trivy): fixable HIGH and CRITICAL vulnerabilities fail the pipeline.
-7. **Publish** (only on pushes to `main`, after all checks pass): build the images and push them to GitHub Container Registry, tagged `latest` and with the commit SHA.
+7. **Publish** (only on pushes to `main`, after all checks pass): build the images and push them to GitHub Container Registry, tagged `latest` and with the commit SHA. Layers are cached between runs with the GitHub Actions cache.
 
-A separate `security` workflow scans the full git history for leaked secrets with [gitleaks](https://github.com/gitleaks/gitleaks) on every push and pull request.
+### Principles
 
-No real secrets are used in CI: the checks run with the template values from `.env.example`, and publishing uses the built-in short-lived `GITHUB_TOKEN` with minimal permissions.
+- No real secrets in CI: the checks run with the template values from `.env.example`, and publishing uses the built-in short-lived `GITHUB_TOKEN` with minimal permissions.
+- Third-party actions that handle security checks (Trivy) are pinned to a full commit hash.
+- Every change goes through a branch and a pull request.
 
 ## Skills practiced so far
 
@@ -63,7 +77,9 @@ No real secrets are used in CI: the checks run with the template values from `.e
 - **Container hardening:** non-root users, dropped capabilities, read-only filesystems, resource limits, network segmentation, image vulnerability scanning
 - **Data stores:** PostgreSQL and Redis in containers, persistent volumes
 - **Web:** Nginx as a static server and reverse proxy
-- **CI:** GitHub Actions workflows, path filters, job dependencies, publishing images to GHCR, secret scanning, reading and fixing failing pipelines
+- **CI:** GitHub Actions workflows, path filters, job dependencies, matrix builds, scheduled runs, build caching, publishing images to GHCR, secret scanning, pinning actions by commit hash, reading and fixing failing pipelines
+- **Dependency hygiene:** Dependabot for actions, Docker images and packages
+- **Git workflow:** feature branches, pull requests, resolving merge conflicts and divergent branches
 - **Deployment:** deploying a container image to a cloud platform (Render)
 - **Security hygiene:** keeping secrets out of Git, GitHub push protection, least-privilege setups
 
@@ -74,7 +90,12 @@ No real secrets are used in CI: the checks run with the template values from `.e
 - [x] Publish images to GitHub Container Registry
 - [x] Secret scanning (gitleaks) and image vulnerability scanning (Trivy) in CI
 - [x] Run containers as a non-root user
+- [x] CI for Todo API
+- [x] Scheduled Trivy scan and Dependabot configuration
+- [ ] Branch protection for `main` (required pull request and checks)
+- [ ] Harden the applications (graceful shutdown, healthcheck for the frontend, pinned base images)
 - [ ] Deploy to a VPS with a domain and HTTPS (Caddy)
+- [ ] Continuous delivery: deploy to the server from GitHub Actions, rollback by commit tag
 - [ ] Automate server setup with Ansible
 - [ ] Provision infrastructure with Terraform
 - [ ] Monitoring with Prometheus and Grafana
@@ -84,7 +105,9 @@ No real secrets are used in CI: the checks run with the template values from `.e
 
 ```
 .
-├── .github/workflows/          # CI pipelines
+├── .github/
+│   ├── workflows/              # guestbook-ci, todo-ci, security, schedule-scan
+│   └── dependabot.yml          # automatic dependency update PRs
 ├── guestbook-new/              # main project (own README inside)
 ├── archive_projects/
 │   ├── docker_compose_frontend/   # Guestbook v1

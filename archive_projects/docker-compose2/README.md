@@ -1,5 +1,7 @@
 # Todo API — Flask + PostgreSQL + Docker Compose
 
+[![todo-ci](https://github.com/wertyjonio/develop-devOps/actions/workflows/todo-ci.yml/badge.svg)](https://github.com/wertyjonio/develop-devOps/actions/workflows/todo-ci.yml)
+
 Небольшой учебный проект для практики DevOps: REST API для списка задач на Flask с базой данных PostgreSQL, полностью упакованный в контейнеры и запускаемый одной командой через Docker Compose.
 
 ## Стек
