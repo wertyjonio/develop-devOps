@@ -21,12 +21,12 @@ updates:
       interval: "weekly"
 
   - package-ecosystem: "npm"
-    directory: "/guestbook/api"
+    directory: "/guestbook-new/api"
     schedule:
       interval: "weekly"
 
   - package-ecosystem: "npm"
-    directory: "/guestbook/frontend"
+    directory: "/guestbook-new/frontend"
     schedule:
       interval: "weekly"
       
