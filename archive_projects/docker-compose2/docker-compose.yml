@@ -14,7 +14,7 @@ services:
       timeout: 3s
       retries: 5
 
-    app:
+  app:
     build: ./app
     ports:
       - "5000:5000"
