@@ -23,6 +23,11 @@ services:
     depends_on:
       db:
         condition: service_healthy
+    healtthcheck:
+      test: ["CMD", "python", "-c", "import urlib.request.urlopen('http://127.0.0.1:5000/health')"]
+      interval: 5s
+      delay: 3s
+      retries: 5
 
 volumes:
   pgdata:

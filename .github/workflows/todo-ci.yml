@@ -12,6 +12,13 @@ on:
       - ".github/workflows/todo-ci.yml"
   workflow_dispatch:
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   lint-and-build:
     runs-on: ubuntu-latest
@@ -39,7 +46,10 @@ jobs:
       - name: Smoke test
         run: |
           docker compose up -d --wait
-          curl -f --retry 10 --retry-connrefused --retry-delay 2 http://localhost:5000/health
+          curl -fsS --retry 10 --retry-connrefused --retry-delay 2 --max-time 5 http://127.0.0.1:5000/health
+          curl -fsS --max-time 5 -X POST http://127.0.0.1:5000/todos \
+            -H "Content-Type: application/json" -d '{"title": "ci"}'
+          curl -fsS --max-time 5 http://127.0.0.1:5000/todos | grep -q '"ci"'
       
       - name: Show logs
         if: failure()
@@ -48,3 +58,29 @@ jobs:
       - name: Cleanup
         if: always()
         run: docker compose down -v
+  
+  image-scan:
+    needs: lint-and-build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: docker/setup-buildx-action@v4
+
+      - name: Build app image
+        uses: docker/build-push-action@v7
+        with:
+          context: archive_projects/docker-compose2/app
+          load: true
+          tags: docker-compose2-app:scan
+          cache-from: type=gha,scope=app
+          cache-to: type=gha,mode=max,scope=app
+
+      - name: Scan app image
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25
+        with: 
+          image-ref: docker-compose2-app:scan
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: '1'
+
