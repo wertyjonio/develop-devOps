@@ -125,7 +125,8 @@ All endpoints are reachable through the frontend under the `/api` prefix, for ex
 | Method | Path        | Description                                                  |
 |--------|-------------|--------------------------------------------------------------|
 | GET    | `/health`   | API and Redis health check                                   |
-| GET    | `/stats`    | visit counter (incremented on every call) and message count  |
+| GET    | `/stats`    | visit counter and message count (read-only)                  |
+| POST   | `/visit`    | count one visit (the frontend calls it once per tab session) |
 | GET    | `/messages` | last 50 messages, newest first                               |
 | POST   | `/messages` | create a message: `{"name": "...", "text": "..."}`           |
 
