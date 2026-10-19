@@ -11,7 +11,7 @@ networks:
 
 services:
   redis:
-    image: redis:7.4-alpine
+    image: redis:8.10-alpine
     restart: unless-stopped
     user: "999:999"
     networks: [backend]
