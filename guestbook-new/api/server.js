@@ -9,6 +9,7 @@ const REDIS_PORT = Number(process.env.REDIS_PORT) || 6379;
 const REDIS_PASSWORD = process.env.REDIS_PASSWORD || undefined;
 
 const MESSAGES_KEY = "messages";
+const VISITS_KEY = "visits";
 const MAX_MESSAGES = 50;
 
 const redis = createClient({
@@ -34,13 +35,25 @@ app.get("/health", async (req, res) => {
   }
 });
 
-// Счётчик визитов + количество сообщений
+// Статистика: только чтение, без побочных эффектов
+// (GET не должен менять данные: иначе счётчик растёт от ботов, проверок и curl)
 app.get(
   "/stats",
   wrap(async (req, res) => {
-    const visits = await redis.incr("visits");
-    const messages = await redis.lLen(MESSAGES_KEY);
-    res.json({ visits, messages });
+    const [visits, messages] = await Promise.all([
+      redis.get(VISITS_KEY),
+      redis.lLen(MESSAGES_KEY),
+    ]);
+    res.json({ visits: Number(visits) || 0, messages });
+  })
+);
+
+// Засчитать посещение: фронтенд вызывает один раз за сессию вкладки
+app.post(
+  "/visit",
+  wrap(async (req, res) => {
+    const visits = await redis.incr(VISITS_KEY);
+    res.json({ visits });
   })
 );
 
@@ -80,9 +93,46 @@ app.use((err, req, res, next) => {
   res.status(500).json({ error: "internal error" });
 });
 
+/* ---------- Корректная остановка ---------- */
+
+let server;
+let shuttingDown = false;
+
+async function shutdown(signal) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  console.log(`Получен ${signal}, завершаю работу...`);
+
+  // Страховка: Docker через 10 секунд после SIGTERM пришлёт SIGKILL,
+  // поэтому выходим сами раньше, если что-то зависло
+  setTimeout(() => {
+    console.error("Не успели завершиться вовремя, выхожу принудительно");
+    process.exit(1);
+  }, 8000).unref();
+
+  try {
+    if (server) {
+      // перестать принимать новые соединения и дождаться текущих запросов
+      await new Promise((resolve, reject) => {
+        server.close((err) => (err ? reject(err) : resolve()));
+        server.closeIdleConnections(); // не ждать «спящие» keep-alive соединения
+      });
+    }
+    if (redis.isOpen) await redis.quit(); // дождаться выполнения команд и закрыть соединение
+    console.log("Остановлен корректно");
+    process.exit(0);
+  } catch (err) {
+    console.error("Ошибка при остановке:", err.message);
+    process.exit(1);
+  }
+}
+
+process.on("SIGTERM", () => shutdown("SIGTERM")); // docker stop / docker compose down
+process.on("SIGINT", () => shutdown("SIGINT")); // Ctrl+C
+
 (async () => {
   // connect() сам повторяет попытки, пока Redis не поднимется
   await redis.connect();
   console.log(`Подключено к Redis ${REDIS_HOST}:${REDIS_PORT}`);
-  app.listen(PORT, "0.0.0.0", () => console.log(`API слушает порт ${PORT}`));
+  server = app.listen(PORT, "0.0.0.0", () => console.log(`API слушает порт ${PORT}`));
 })();
