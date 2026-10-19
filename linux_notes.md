@@ -16,6 +16,7 @@
 9. [Сеть](#9-сеть)
 10. [Безопасность сервера (hardening)](#10-безопасность-сервера-hardening)
 11. [Docker](#11-docker)
+12. [CI/CD](12#-GitHub Actions)
 
 ---
 
@@ -539,3 +540,419 @@ sudo ufw status verbose        # аудит правил
 - `restart: unless-stopped` — автоперезапуск.
 - Секреты через `.env` (в `.gitignore`) плюс `.env.example` как шаблон в репозитории.
 - Наружу публикуй только то, что нужно (обычно один входной сервис).
+
+
+### 11.7. Healthcheck и порядок запуска
+
+Healthcheck периодически выполняет команду внутри контейнера. Код выхода `0` значит «здоров», иначе «нездоров».
+
+Состояния: `starting` (идёт `start_period` или ещё не было проверок), `healthy`, `unhealthy` (подряд провалено `retries` проверок).
+
+```yaml
+services:
+  db:
+    image: postgres:16
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER} -d ${DB_NAME}"]
+      interval: 5s        # как часто проверять
+      timeout: 3s         # сколько ждать ответ одной проверки
+      retries: 5          # сколько неудач подряд до unhealthy
+      start_period: 10s   # время на запуск: неудачи в этот период не считаются
+
+  app:
+    build: ./app
+    depends_on:
+      db:
+        condition: service_healthy     # стартовать только когда db healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:5000/health', timeout=3)"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+```
+
+- `CMD` запускает программу напрямую, `CMD-SHELL` через shell (нужен для `|`, `||`, переменных).
+- В `test` знак `$` экранируется как `$$`, чтобы переменную подставил shell контейнера, а не Compose.
+- В `slim`-образах Python нет `curl`, поэтому проверяют через `python -c`. В Alpine есть `wget` из busybox: `wget -qO- http://127.0.0.1:3000/health > /dev/null || exit 1`.
+- В адресе healthcheck пиши `127.0.0.1`, а не `localhost`: `localhost` может резолвиться в IPv6 (`::1`), а приложение слушает только IPv4.
+- `docker compose up -d --wait` ждёт, пока сервисы с healthcheck станут `healthy`, и завершается с ошибкой, если один из них `unhealthy`. Сервис без healthcheck считается готовым, как только запущен.
+
+**Если контейнер `unhealthy`, сначала читай результаты проверок:**
+```bash
+docker inspect --format '{{json .State.Health}}' <контейнер>
+```
+В поле `Output` будет текст ошибки команды проверки (например, `SyntaxError` в Python-однострочнике или `curl: not found`). Это быстрее, чем гадать по логам.
+
+### 11.8. Hardening контейнеров в Compose
+
+```yaml
+services:
+  api:
+    build: ./api
+    init: true                       # PID 1 пробрасывает сигналы и убирает зомби
+    user: "1000:1000"                # не root (или USER в Dockerfile)
+    read_only: true                  # корневая ФС только для чтения
+    tmpfs:
+      - /tmp                         # место для временных файлов
+    cap_drop: [ALL]                  # убрать все Linux capabilities
+    security_opt:
+      - no-new-privileges:true       # запрет повышения привилегий через setuid
+    mem_limit: 256m
+    cpus: 0.5
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"              # ротация логов, чтобы не забить диск
+        max-file: "3"
+    networks: [backend]
+
+networks:
+  backend:
+    internal: true                   # (по желанию) сеть без доступа наружу
+```
+
+- **Сегментация сетей:** разные сети для разных связок (`edge`: frontend + api, `backend`: api + БД). Тогда фронтенд физически не видит базу.
+- **Порты:** публикуй только входной сервис, на loopback: `"127.0.0.1:8081:8080"`. Docker обходит UFW (см. раздел 10), поэтому наружу выставляй через reverse proxy.
+
+**Проверка hardening:**
+```bash
+docker compose top                                   # пользователи процессов, root быть не должно
+docker compose exec api id -u                        # не 0
+docker compose exec api touch /app/test.txt          # Read-only file system (ожидаемо)
+docker compose exec api touch /tmp/test.txt          # работает благодаря tmpfs
+docker compose exec frontend getent hosts redis      # не резолвится (нет общей сети)
+docker stats --no-stream                             # память и CPU против лимитов
+```
+
+**Типичные ошибки после hardening:**
+| Симптом | Причина | Решение |
+|---------|---------|---------|
+| `Read-only file system` в логах | сервис пишет не в volume и не в tmpfs | добавить путь в `tmpfs` |
+| `Operation not permitted` сразу после старта | нужна capability, убранная `cap_drop: [ALL]` | вернуть только нужную через `cap_add` |
+| Redis не стартует, `permission denied` на `/data` | volume создан с другим владельцем | `docker compose down -v` (данные удалятся) |
+
+### 11.9. Безопасность образов
+
+- **Trivy** сканирует образ на известные уязвимости (CVE):
+  ```bash
+  trivy image --severity HIGH,CRITICAL --ignore-unfixed myimage:tag
+  ```
+  `--ignore-unfixed` скрывает уязвимости, для которых исправления ещё нет.
+- **Как читать таблицу:** `Library` (пакет), `Vulnerability` (номер CVE), `Severity`, `Installed Version` и `Fixed Version`. Суффикс `-r0` у версий означает пакет Alpine (`apk`): значит, проблема в базовом образе, а не в твоём коде.
+- **Порядок исправления:**
+  1. Пересобрать на свежем базовом образе (`docker build --pull --no-cache`).
+  2. Если база ещё не обновилась, обновить пакеты в самом образе:
+     ```dockerfile
+     FROM nginxinc/nginx-unprivileged:<версия>-alpine
+     USER root
+     # hadolint ignore=DL3017
+     RUN apk upgrade --no-cache
+     USER nginx
+     ```
+     Пользователь переключается на root только на время установки и возвращается обратно: итоговый контейнер не должен работать от root. Комментарий `hadolint ignore=DL3017` нужен, потому что линтер не любит `apk upgrade` (но здесь это осознанный выбор).
+  3. Поднять версию базового образа.
+  4. Только в крайнем случае `.trivyignore` с CVE и **обязательным комментарием**, почему уязвимость неприменима.
+- **hadolint** проверяет Dockerfile по best practices (`hadolint Dockerfile`). Отключить правило точечно: комментарий `# hadolint ignore=DLxxxx` строкой выше.
+- **Версии базовых образов фиксируй** (`node:20-alpine`, `postgres:16`, не `latest`). Для повторяемости ещё надёжнее закрепить по digest (`image@sha256:...`). Обновлять версии удобно через Dependabot.
+
+### 11.10. Сборка: кэш и сеть
+
+- Слои кэшируются: инструкция пересобирается, только если изменилась она сама или любая выше. Поэтому сначала зависимости (`COPY package*.json` + `npm ci` или `COPY requirements.txt` + `pip install`), потом исходный код.
+- `docker build --no-cache` — собрать без кэша, `--pull` — заново скачать базовый образ.
+- `docker build --network=host` — собрать, используя сеть хоста. Помогает, если в WSL сборка не может разрешить DNS (ошибки загрузки пакетов во время `RUN`).
+- `docker compose build` и `docker compose up --build` используют те же слои.
+
+### 11.11. Диагностика контейнера
+
+| Симптом | Куда смотреть |
+|---------|---------------|
+| Контейнер сразу `Exited` | `docker compose ps -a`, затем `docker compose logs <сервис>`, там причина и код выхода |
+| `unhealthy` | `docker inspect --format '{{json .State.Health}}' <контейнер>`, поле `Output` |
+| `host not found in upstream "api"` (Nginx) | имя в `proxy_pass` не совпадает с именем сервиса Compose, или сервисы не в общей сети |
+| `502 Bad Gateway` | бэкенд не работает: `docker compose logs api` |
+| Приложение не открывается снаружи | слушает `127.0.0.1` внутри контейнера, а нужно `0.0.0.0`; не опубликован порт |
+| Падает `docker compose config` | чаще всего YAML: съехали отступы (только пробелы, не табы) |
+| Остались «висящие» тома, образы | `docker system df`, `docker system prune` (осторожно) |
+
+Ошибки `docker compose config`:
+- `additional properties 'xxx' not allowed`: ключ стоит не на своём уровне (например, `healthcheck` оказался внутри `depends_on`). Ключи сервиса (`image`, `build`, `depends_on`, `healthcheck`, `ports`) стоят на одном уровне отступа.
+- `mapping key "xxx" already defined`: один ключ дважды в одном блоке, обычно от того, что блоки двух сервисов склеились.
+- `variable is not set` / `REDIS_PASSWORD is not set`: в `.env` нет переменной, а в Compose стоит `${VAR:?...}`.
+
+---
+
+# Часть В. Новый раздел 12 (добавь в конец файла)
+
+---
+
+## 12. CI/CD (GitHub Actions)
+
+### 12.1. Основные понятия
+
+- **CI** (Continuous Integration): каждое изменение автоматически проверяется (линт, сборка, тесты, сканирование). Красный результат блокирует слияние.
+- **CD** (Continuous Delivery/Deployment): проверенная версия автоматически доставляется на сервер.
+- **Путь деплоя:** `git push` → CI → образ в реестре → сервер скачивает образ → запуск. Откат: запустить предыдущий образ по тегу с хэшем коммита.
+- **Pipeline** (пайплайн): набор автоматических шагов. Читаем его сверху вниз.
+
+### 12.2. Git-процесс под CI
+
+Любое изменение идёт так: **ветка → коммит → pull request → зелёный CI → merge**.
+
+```bash
+git switch main && git pull                  # свежий main
+git switch -c ci/my-change                   # новая ветка
+# ... правки ...
+git add <файлы>
+git commit -m "ci: описание"                 # Conventional Commits
+git push -u origin ci/my-change              # -u запоминает связь с удалённой веткой
+# открыть Pull Request на GitHub, дождаться зелёных проверок, смержить
+```
+
+**После merge:**
+```bash
+git switch main
+git pull
+git branch -d ci/my-change                   # удалить локальную ветку
+git push origin --delete ci/my-change        # удалить удалённую (или кнопка Delete branch)
+git fetch --prune                            # убрать устаревшие ссылки на удалённые ветки
+```
+- `git branch -d` удаляет только полностью слитую ветку; `-D` удаляет принудительно (осторожно).
+- Если `-d` ругается «not fully merged», сначала синхронизируйся с `origin/main`.
+
+**Конфликт слияния** (в файле появились маркеры):
+```
+<<<<<<< HEAD (текущая ветка)
+твоя версия
+=======
+версия из другой ветки
+>>>>>>> main
+```
+Оставь нужный итог (часто комбинацию обеих версий), **удали все три маркера**, затем `git add <файл>` и `git commit`. Маркеры в файле ломают YAML и скрипты.
+
+**`git pull` пишет «divergent branches»:** история локальная и удалённая разошлась (у каждой есть свои коммиты). Варианты:
+```bash
+git log --oneline --graph --all -n 10         # посмотреть, что где
+git pull --rebase                             # переложить свои коммиты поверх удалённых (линейная история)
+git config --global pull.rebase true          # сделать rebase режимом по умолчанию
+```
+Если локальный коммит не нужен (например, его уже слили иначе на GitHub): сначала резервная ветка, потом сброс:
+```bash
+git branch backup-main
+git reset --hard origin/main                  # опасно: отбрасывает локальные коммиты и правки
+```
+
+**Защита `main`** (Settings → Rules → Rulesets): обязательный pull request, запрет force push и удаления ветки, обязательные проверки (`Require status checks`). Ловушка: если у workflow есть фильтр `paths`, то на PR без изменений в этих папках проверка не запускается и обязательная проверка висит как «Expected» навсегда. Обязательными делай проверки без `paths` (например, сканирование секретов). В приватных репозиториях на бесплатном тарифе rulesets недоступны.
+
+### 12.3. Устройство GitHub Actions
+
+Workflow лежит в `.github/workflows/*.yml` (расширение `.yml` или `.yaml`, строго эта папка).
+
+| Термин | Что это |
+|--------|---------|
+| **Workflow** | один YAML-файл с автоматизацией |
+| **Event** (`on:`) | что запускает: `push`, `pull_request`, `workflow_dispatch`, `schedule` |
+| **Job** | набор шагов на одном раннере; jobs по умолчанию идут **параллельно** |
+| **Runner** | виртуальная машина (`ubuntu-latest`), чистая на каждый запуск |
+| **Step** | один шаг: `run:` (команда shell) или `uses:` (готовый экшен) |
+| **Action** | готовый переиспользуемый блок (`actions/checkout`, `docker/build-push-action`) |
+
+```yaml
+name: my-ci
+
+on:
+  push:
+    branches: [main]
+    paths:                              # запускать, только если менялось это
+      - "myapp/**"
+      - ".github/workflows/my-ci.yml"
+  pull_request:
+    paths:
+      - "myapp/**"
+      - ".github/workflows/my-ci.yml"
+  workflow_dispatch:                    # кнопка ручного запуска
+  # schedule:
+  #   - cron: "0 5 * * 1"               # по расписанию (UTC)
+
+permissions:
+  contents: read                        # права токена по минимуму
+
+concurrency:                            # новый пуш отменяет прошлый запуск в той же ветке
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10                 # защита от зависаний
+    defaults:
+      run:
+        working-directory: myapp        # только для шагов run:, не для uses:
+    steps:
+      - uses: actions/checkout@v7       # скачать код
+      - name: Validate
+        run: docker compose config > /dev/null
+      - name: Show logs
+        if: failure()                   # только если что-то упало выше
+        run: docker compose logs
+      - name: Cleanup
+        if: always()                    # выполнять в любом случае
+        run: docker compose down -v
+
+  scan:
+    needs: build                        # запуститься после успеха job build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+```
+
+Полезное:
+- `with:` передаёт параметры экшену; `env:` задаёт переменные окружения; `${{ secrets.NAME }}` читает секрет; `${{ github.sha }}` хэш коммита; `${{ github.actor }}` кто запустил.
+- Условие для публикации только на `main`: `if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'`.
+- **Один PR запускает все workflow, чьи триггеры сработали**, поэтому нужны `paths`, иначе на любой PR запустятся все проекты.
+- **`schedule`** работает только из файла в главной ветке; время в UTC. В публичных репозиториях GitHub отключает расписание после 60 дней без активности (включается кнопкой во вкладке Actions).
+- **Matrix** запускает job для каждого значения:
+  ```yaml
+  strategy:
+    fail-fast: false                    # не отменять остальные при падении одного
+    matrix:
+      include:
+        - name: guestbook-api
+          context: guestbook-new/api
+        - name: todo-app
+          context: archive_projects/docker-compose2/app
+  # дальше ${{ matrix.name }} и ${{ matrix.context }}
+  ```
+- **`needs`** задаёт порядок: если упал нужный job, зависимый пропускается.
+
+### 12.4. Типовой пайплайн для Docker-проекта
+
+1. **Lint** Dockerfile (hadolint).
+2. **Validate** Compose (`docker compose config`).
+3. **Build** (`docker compose build`).
+4. **Smoke test**: поднять стек и проверить, что он реально работает.
+5. **Scan** образа (Trivy), падение на HIGH и CRITICAL с исправлением.
+6. **Publish** образов в реестр (только на `main`, после всех проверок).
+
+В CI вместо настоящего `.env` берём шаблон: `cp .env.example .env` (в нём тестовые значения, реальных секретов нет).
+
+**Smoke test** на `curl`:
+```bash
+docker compose up -d --wait
+curl -fsS --retry 10 --retry-connrefused --retry-delay 2 --max-time 5 http://127.0.0.1:5000/health
+# запись и чтение: проверка, что работает БД, а не просто отвечает приложение
+curl -fsS --max-time 5 -X POST http://127.0.0.1:5000/todos \
+  -H "Content-Type: application/json" -d '{"title": "ci"}'
+curl -fsS --max-time 5 http://127.0.0.1:5000/todos | grep -q '"ci"'
+```
+
+| Флаг curl | Что делает |
+|-----------|------------|
+| `-f` | вернуть ошибку на ответ 4xx/5xx (без него `500` считался бы успехом) |
+| `-s` | не печатать таблицу прогресса |
+| `-S` | но показывать текст ошибки, если она есть |
+| `--retry N` | повторить до N раз при временных ошибках |
+| `--retry-connrefused` | считать «connection refused» временной ошибкой (сервис ещё стартует) |
+| `--retry-delay N` | пауза между повторами в секундах |
+| `--max-time N` | максимум N секунд на один запрос (чтобы не висеть) |
+| `-X POST`, `-H`, `-d` | метод, заголовок, тело запроса |
+
+**Важно: длинные флаги пишутся с двумя дефисами.** `-retry-delay 2` curl разбирает как набор коротких флагов, а `2` принимает за адрес (отсюда бесконечные строки с нулями в логе и зависший шаг).
+
+### 12.5. Публикация образов в GHCR
+
+```yaml
+publish:
+  needs: [lint-and-build, image-scan]
+  if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+  runs-on: ubuntu-latest
+  permissions:
+    contents: read
+    packages: write                     # право на push в реестр, только этому job
+  steps:
+    - uses: actions/checkout@v7
+    - uses: docker/setup-buildx-action@v4   # сборщик Buildx (нужен для кэша)
+    - uses: docker/login-action@v4
+      with:
+        registry: ghcr.io
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}   # встроенный краткоживущий токен
+    - uses: docker/build-push-action@v7
+      with:
+        context: guestbook-new/api
+        push: true
+        tags: |
+          ghcr.io/${{ github.repository_owner }}/guestbook-api:latest
+          ghcr.io/${{ github.repository_owner }}/guestbook-api:${{ github.sha }}
+        cache-from: type=gha,scope=api
+        cache-to: type=gha,mode=max,scope=api
+```
+
+- Тег `latest` удобен, тег с `github.sha` нужен для **точного отката** и воспроизводимости.
+- Адрес реестра `ghcr.io` (опечатка `ghrc.io` даёт `denied`). Имя образа должно быть в нижнем регистре.
+- На сервере вход в GHCR: токен (PAT) с правом `read:packages`, `docker login ghcr.io -u <user>`.
+- **Параметры `build-push-action`:** `context` (папка сборки, как `build:` в Compose), `push: true` (отправить в реестр), `load: true` (загрузить собранный образ в локальный Docker раннера, нужно для сканирования; Buildx по умолчанию не кладёт образ в `docker images`), `tags` (имена), `cache-from` / `cache-to` (кэш слоёв в хранилище GitHub Actions; `scope` разделяет кэш разных образов, `mode=max` сохраняет и промежуточные стадии).
+
+### 12.6. Безопасность в CI
+
+- **Секреты:** никогда не в Git. Для CI используются GitHub Secrets (`${{ secrets.NAME }}`) и тестовые значения из `.env.example`. Если секрет попал в историю, удаления файла недостаточно: ключ нужно **перевыпустить**.
+- **Минимальные права токена:** `permissions: contents: read` на уровне workflow; расширенные права (`packages: write`) только в том job, которому они нужны. Указанное в `permissions` ограничивает всё остальное до `none`.
+- **Сканирование секретов:** `gitleaks` с `fetch-depth: 0` (нужна вся история, а не последний коммит) на каждый пуш и PR.
+- **Закрепление экшенов по хэшу коммита** (`uses: owner/action@<40 символов>  # v1.2.3`): тег можно переместить на другой код, хэш нельзя. Минимум для экшенов безопасности (Trivy).
+- **Dependabot** (`.github/dependabot.yml`) раз в неделю открывает PR с обновлениями:
+  ```yaml
+  version: 2
+  updates:
+    - package-ecosystem: "github-actions"
+      directory: "/"
+      schedule:
+        interval: "weekly"
+    - package-ecosystem: "docker"            # FROM в Dockerfile
+      directory: "/myapp/api"
+      schedule:
+        interval: "weekly"
+    - package-ecosystem: "docker-compose"    # image: в compose-файле
+      directory: "/myapp"
+      schedule:
+        interval: "weekly"
+    - package-ecosystem: "npm"               # или "pip" для requirements.txt
+      directory: "/myapp/api"
+      schedule:
+        interval: "weekly"
+  ```
+  Каждый `directory` должен существовать, иначе Dependabot выдаст ошибку.
+- **Регулярное сканирование:** новые уязвимости находят и без изменений в коде, поэтому Trivy запускают ещё и по `schedule`.
+
+### 12.7. Как читать упавший пайплайн
+
+1. Найти **первый красный шаг** (последующие часто серые или красные из-за него).
+2. Прочитать **конец лога** этого шага: там причина.
+3. Воспроизвести локально теми же командами (`docker compose config`, `docker compose up -d --build --wait`).
+
+**Каталог ошибок:**
+
+| Симптом | Причина | Решение |
+|---------|---------|---------|
+| `Set up job` красный, `unable to find version` | неверный тег экшена (нет `v`, версии не существует) | сверить тег на странице экшена |
+| `docker compose config > dev/null` падает | потерян `/` в `/dev/null` | исправить путь |
+| `REDIS_PASSWORD is not set` | пустое значение в `.env.example` | задать тестовое значение |
+| `denied` при push в GHCR | опечатка `ghrc.io` вместо `ghcr.io`, нет `packages: write` | исправить адрес / права |
+| `Unexpected value 'worklflow_dispatch'` | опечатка в ключе workflow | исправить ключ |
+| `invalid --security-opt` | опечатка `no-new-priveledges` | `no-new-privileges` |
+| Шаг с `curl` висит, в логе нули и растущее время | `-retry-delay` с одним дефисом, нет `--max-time` | `--retry-delay`, добавить `--max-time`, `timeout-minutes` |
+| `container ... is unhealthy` | ошибка в самой команде healthcheck или приложение не стартует | `docker inspect ... .State.Health`, поле `Output` |
+| `additional properties 'xxx' not allowed` / `mapping key ... already defined` | съехали отступы в YAML | выровнять уровни, только пробелы, `docker compose config` локально |
+| `image-scan` красный, таблица Trivy | в образе пакеты с известными уязвимостями, исправление уже вышло | пересобрать на свежей базе или `apk upgrade`, см. 11.9 |
+| Конфликт слияния в редакторе | в `main` и в ветке изменена одна и та же строка | оставить итог, удалить маркеры `<<<<<<<`, `=======`, `>>>>>>>` |
+| `Invalid workflow file` | ошибка YAML (отступы, опечатка в ключе) | проверить отступы и имена ключей |
+| На PR `Checks 0` и крутится «Checking for the ability to merge» | задержка на стороне GitHub | подождать 1-2 минуты, Ctrl+F5; проверить вкладку Actions |
+| Из одного PR запустилось несколько workflow | сработали триггеры нескольких файлов, нет `paths` | добавить `paths` в `pull_request`, `concurrency` |
+| Обязательная проверка висит «Expected» | workflow не запустился из-за `paths` | делать обязательными только проверки без `paths` |
+
+### 12.8. Основы CD (дальнейший план)
+
+- Для деплоя создаётся **отдельный SSH-ключ** (не личный) и кладётся в GitHub Secrets, а публичная часть на сервер.
+- Деплой-workflow по успешному CI заходит на сервер и выполняет `docker compose pull && docker compose up -d`.
+- **Environment `production`** с ручным подтверждением защищает от случайного деплоя.
+- **Откат:** развернуть предыдущий образ по тегу с хэшем коммита (поэтому образы публикуются с `${{ github.sha }}`).
+- Сервер за reverse proxy (Caddy) с доменом и HTTPS; порт приложения привязан к `127.0.0.1`.
