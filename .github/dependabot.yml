@@ -29,4 +29,19 @@ updates:
     directory: "/guestbook-new/frontend"
     schedule:
       interval: "weekly"
+
+  - package-ecosystem: "pip"
+    directory: "/archive_projects/docker-compose2/app"
+    schedule:
+      interval: "weekly"
+
+  - package-ecosystem: "docker"
+    directory: "/archive_projects/docker-compose2/app"
+    schedule: 
+      interval: "weekly"
+  
+  - package-ecosystem: "docker-compose"
+    directory: "/archive_projects/docker-compose2"
+    schedule: 
+      interval: "weekly"
       

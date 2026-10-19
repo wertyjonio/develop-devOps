@@ -51,8 +51,8 @@ All workflows live in [`.github/workflows/`](.github/workflows/). Project workfl
 | **guestbook-ci** | push to `main` and pull requests touching `guestbook-new/` | Lint (hadolint), validate Compose, build, smoke test through Nginx, Trivy image scan, publish to GHCR on `main` |
 | **todo-ci** | push to `main` and pull requests touching `archive_projects/docker-compose2/` | Lint (hadolint), validate Compose, build, smoke test on `/health` (checks the app and PostgreSQL together), logs on failure, cleanup |
 | **security** | every push and pull request | Scans the full git history for leaked secrets with gitleaks |
-| **schedule-scan** | weekly (Monday, cron) and manually | Rebuilds the Guestbook images and scans them with Trivy, so new CVEs in base images are found even without code changes |
-| **Dependabot** | weekly | Opens pull requests with updates for GitHub Actions, Docker base images and dependencies |
+| **schedule-scan** | weekly (Monday, cron) and manually | Rebuilds the Guestbook and Todo API images and scans them with Trivy, so new CVEs in base images and dependencies are found even without code changes |
+| **Dependabot** | weekly | Opens pull requests with updates for GitHub Actions, Docker base images, Compose images, npm and pip dependencies |
 
 ### Guestbook pipeline in detail
 
