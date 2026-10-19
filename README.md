@@ -92,7 +92,7 @@ All workflows live in [`.github/workflows/`](.github/workflows/). Project workfl
 - [x] Run containers as a non-root user
 - [x] CI for Todo API
 - [x] Scheduled Trivy scan and Dependabot configuration
-- [ ] Branch protection for `main` (required pull request and checks)
+- [x] Branch protection for `main` (required pull request and checks)
 - [ ] Harden the applications (graceful shutdown, healthcheck for the frontend, pinned base images)
 - [ ] Deploy to a VPS with a domain and HTTPS (Caddy)
 - [ ] Continuous delivery: deploy to the server from GitHub Actions, rollback by commit tag
