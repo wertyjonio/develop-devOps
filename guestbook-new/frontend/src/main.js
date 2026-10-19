@@ -91,9 +91,20 @@ async function loadMessages() {
   }
 }
 
+async function registerVisit() {
+  // один визит на сессию вкладки, а не на каждую перезагрузку
+  try {
+    if (sessionStorage.getItem("visited")) return;
+    await request("/visit", { method: "POST" });
+    sessionStorage.setItem("visited", "1");
+  } catch {
+    // счётчик не критичен (sessionStorage может быть недоступен)
+  }
+}
+
 async function loadStats() {
   try {
-    const s = await request("/stats"); // каждый вызов увеличивает счётчик визитов
+    const s = await request("/stats"); // только чтение
     $("visits").textContent = s.visits;
     $("count").textContent = s.messages;
   } catch {
@@ -139,7 +150,7 @@ $("form").addEventListener("submit", async (e) => {
 
 /* ---------- Старт ---------- */
 
-loadStats();
+registerVisit().then(loadStats);
 checkHealth();
 setInterval(checkHealth, 10000);
 render();
