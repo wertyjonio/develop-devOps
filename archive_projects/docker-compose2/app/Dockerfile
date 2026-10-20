@@ -1,4 +1,4 @@
-FROM python:3.12-slim
+FROM python:3.15-slim
 WORKDIR /usr/src/app
 LABEL maintainer="Ivan Utkin <wertyjonio@gmail.com>"
 COPY requirements.txt .
