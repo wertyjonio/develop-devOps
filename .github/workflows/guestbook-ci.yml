@@ -13,6 +13,9 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
   
+permissions: 
+  contents: read
+
 jobs:
   lint-and-build:
     runs-on: ubuntu-latest
@@ -21,7 +24,7 @@ jobs:
       run:
         working-directory: guestbook-new
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Lint Dockerfile (api)
         uses: hadolint/hadolint-action@v3.1.0
