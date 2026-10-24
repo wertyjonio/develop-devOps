@@ -15,7 +15,7 @@ My hands-on DevOps learning lab: containerized projects, CI pipelines, systemd a
 | **[Guestbook v1](archive_projects/docker_compose_frontend/)** | Earlier iteration of the guestbook: static HTML frontend on Nginx, Node.js API, Redis with AOF persistence and healthchecks. Superseded by the main version above (multi-stage build, Redis password, SPA routing) | Nginx, Node.js/Express, Redis, Docker Compose |
 | **[Smart Backup](archive_projects/smart-backup/)** | Backup utility in a minimal Alpine container, run on a schedule by a systemd service and timer (`Persistent=true`), host folders mounted as volumes | Bash, Docker, systemd |
 | **[Catnip](archive_projects/flask-app2/)** | Packaging a small Flask app as a custom image, publishing it to Docker Hub and deploying it to a cloud platform | Flask, Docker, Docker Hub, Render |
-| [`linux_notes.md`](linux_notes.md) | Personal reference: Git, Linux, networking, systemd, hardening, Docker (in Russian) | Markdown |
+| [`devops-notes/`](devops-notes/README.md) | Personal reference split by topic: Git, Linux, networking, systemd, hardening, Docker, CI/CD, interview questions and 24 Docker practice tasks (in Russian) | Markdown |
 
 The smaller and earlier projects live in [`archive_projects/`](archive_projects/); each has its own README.
 
@@ -114,6 +114,7 @@ All workflows live in [`.github/workflows/`](.github/workflows/). Project workfl
 │   ├── docker-compose2/           # Todo API
 │   ├── flask-app2/                # Catnip
 │   └── smart-backup/              # Smart Backup
-├── linux_notes.md              # personal Linux / Docker reference
+├── devops-notes/               # personal reference notes and Docker practice tasks
 └── README.md
+
 ```
