@@ -19,6 +19,8 @@
 | 7 | Включить UFW | сервер | закрыть всё, кроме 22/80/443 |
 | 8 | Учесть обход UFW у Docker | `docker-compose.yml` | не открыть порты случайно |
 | 9 | Удобный вход через `~/.ssh/config` | локально | `ssh vps` вместо длинной команды |
+| 10 | Установить Docker | сервер | запускать контейнеры проекта |
+| 11 | Keepalive и `tmux` | локально и сервер | переживать обрывы SSH |
 
 ## 1. Ключ на локальной машине
 
@@ -197,7 +199,95 @@ Host vps
 ssh-keygen -R <IP>
 ```
 
-## 10. Дополнительно
+## 10. Установка Docker
+
+Ставим из официального apt-репозитория Docker, а не `docker.io` из репозиториев Ubuntu (тот может быть устаревшим). Команды выполняются на сервере под `deploy`.
+
+```bash
+# 1. подключить репозиторий Docker
+sudo apt update
+sudo apt install -y ca-certificates curl
+sudo install -m 0755 -d /etc/apt/keyrings
+sudo curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+
+sudo tee /etc/apt/sources.list.d/docker.sources <<EOF
+Types: deb
+URIs: https://download.docker.com/linux/ubuntu
+Suites: $(. /etc/os-release && echo "${UBUNTU_CODENAME:-$VERSION_CODENAME}")
+Components: stable
+Signed-By: /etc/apt/keyrings/docker.asc
+EOF
+
+sudo apt update
+
+# 2. поставить Docker Engine и плагины
+sudo apt install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+```
+
+Проверка:
+
+```bash
+sudo systemctl is-enabled docker      # enabled: стартует при загрузке сервера
+sudo docker run --rm hello-world
+docker compose version
+```
+
+Права без `sudo`:
+
+```bash
+sudo usermod -aG docker $USER
+```
+
+Группа применяется только к **новым** сессиям: выйди и зайди по SSH снова, потом проверь `docker ps`.
+
+Доступ к Docker равен root-доступу (контейнер можно запустить с примонтированным `/`), поэтому в группу `docker` добавляем только пользователя для деплоя.
+
+Актуальные команды всегда сверяй с официальной инструкцией (раздел Ubuntu, способ «Install using the apt repository» на docs.docker.com): репозиторий и формат записи со временем меняются.
+
+## 11. Обрывы SSH: keepalive и `tmux`
+
+Если сессию иногда выбрасывает (`Connection reset by peer`, `Broken pipe`), чаще всего виновата сеть, а не настройки сервера: роутер, Wi-Fi, VPN или NAT в WSL2 забывают «молчащее» соединение через несколько минут. Hardening (`sshd`, UFW) действует на вход и новые соединения и уже открытую сессию не рвёт.
+
+**Сначала посмотреть на сервере, не он ли виноват:**
+
+```bash
+uptime                                      # не было ли перезагрузки
+last -x | head                              # reboot / shutdown / входы
+sudo journalctl -u ssh --since "-1 hour"    # что писал sshd в момент обрыва
+sudo dmesg -T | grep -i -E 'oom|killed'     # не убивало ли процессы из-за памяти
+free -h
+```
+
+**Keepalive на клиенте** (локально, `~/.ssh/config`): клиент раз в 30 секунд проверяет связь, NAT не забывает соединение, а реальный обрыв обнаруживается быстро.
+
+```
+Host *
+    ServerAliveInterval 30
+    ServerAliveCountMax 3
+```
+
+**Keepalive на сервере** отдельным файлом, не трогая `01-hardening.conf`:
+
+```bash
+sudo tee /etc/ssh/sshd_config.d/02-keepalive.conf <<'EOF'
+ClientAliveInterval 60
+ClientAliveCountMax 3
+EOF
+sudo sshd -t && sudo systemctl reload ssh
+```
+
+**`tmux`**: сессия терминала живёт на сервере и переживает обрыв SSH. Нужен для долгих команд (`apt upgrade`, `docker pull`, сборка).
+
+```bash
+sudo apt install -y tmux
+tmux                  # запустить сессию
+# ...работаем, связь оборвалась, заходим снова...
+tmux attach           # вернуться в ту же сессию
+```
+
+Базовые клавиши: `Ctrl+b`, затем `d` отсоединиться (сессия продолжает работать); `tmux ls` список сессий. Команды вида `docker compose up -d` обрыв и так не затрагивает, они работают в фоне.
+
+## 12. Дополнительно
 
 | Что | Команда | Зачем |
 |-----|---------|-------|
@@ -215,6 +305,8 @@ ssh-keygen -R <IP>
 - [ ] `sudo sshd -T` показывает `permitrootlogin no` и `passwordauthentication no`
 - [ ] `sudo ufw status verbose` показывает политику `deny (incoming)` и правила 22, 80, 443
 - [ ] `sudo ss -tlnp`: на `0.0.0.0` слушают только ожидаемые сервисы
+- [ ] `docker compose version` работает, `docker ps` работает без `sudo` (после повторного входа)
+- [ ] `systemctl is-enabled docker` выводит `enabled`
 
 ## Каталог ошибок
 
@@ -229,10 +321,12 @@ ssh-keygen -R <IP>
 | пароль всё ещё принимается после настройки | другой файл в `sshd_config.d/` побеждает наш | назвать свой файл `01-...`, проверить `sshd -T` |
 | порт контейнера доступен снаружи при закрытом UFW | Docker обходит UFW | убрать `ports:` или привязать к `127.0.0.1` |
 | `REMOTE HOST IDENTIFICATION HAS CHANGED` | сервер пересоздан, отпечаток сменился | убедиться, что это ожидаемо, `ssh-keygen -R <IP>` |
+| `permission denied while trying to connect to the Docker daemon socket` | пользователь не в группе `docker` или сессия открыта до добавления в группу | `sudo usermod -aG docker $USER`, выйти и зайти по SSH заново |
+| `Connection reset by peer`, `Broken pipe` | NAT или сеть забыли простаивающее соединение | keepalive на клиенте и сервере, долгие команды в `tmux` |
 
 ## Что дальше
 
-- установка Docker на сервер и первый запуск `docker compose` вручную;
+- первый запуск `docker compose` на сервере вручную: образы из GHCR, `.env` на сервере, проверка `health`, обновление и откат по тегу;
 - reverse proxy с HTTPS и доменом (Caddy);
 - деплой из GitHub Actions по отдельному SSH-ключу, откат по тегу коммита;
 - автоматизация всего этого через Ansible.
