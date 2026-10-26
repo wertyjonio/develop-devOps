@@ -17,4 +17,4 @@
 | [07-docker.md](07-docker.md) | Docker, Dockerfile, Compose, healthcheck, hardening, Trivy, диагностика |
 | [08-cicd.md](08-cicd.md) | GitHub Actions, пайплайн для Docker, GHCR, безопасность CI, каталог ошибок, основы CD, Dependabot |
 | [09-interview-questions.md](09-interview-questions.md) | Вопросы для собеседований по Docker и CI |
-| [10-vps-setup.md](10-vps-setup.md) | Первичная настройка VPS по шагам: вход по ключу, пользователь `deploy`, hardening `sshd`, UFW, обход UFW в Docker, чек-лист и каталог ошибок |
+| [10-vps-setup.md](10-vps-setup.md) | Первичная настройка VPS по шагам: вход по ключу, пользователь `deploy`, hardening `sshd`, UFW, обход UFW в Docker, установка Docker, keepalive и `tmux` против обрывов SSH, чек-лист и каталог ошибок |
