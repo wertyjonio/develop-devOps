@@ -1,0 +1,124 @@
+- name: Настройка VPS
+  hosts: vps
+  become: true
+
+  vars: 
+    deploy_user: deploy
+    ssh_pubkey: "{{ lookup('ansible.builtin.file', '~/.ssh/id_ed25519.pub')}}"
+
+  tasks:
+    - name: Обновить кэш пакетов и систему 
+      ansible.builtin.apt:
+        update_cache: true
+        cache_valid_time: 3600
+        upgrade: dist
+    
+    - name: Поставить базовые пакеты
+      ansible.builtin.apt:
+        name:
+          - ufw
+          - curl 
+          - ca-certificates
+          - tmux
+
+    - name: Создать пользователя {{deploy_user}}
+      ansible.builtin.user:
+        name: "{{ deploy_user }}"
+        shell: /bin/bash
+        create_home: true
+
+    - name: Положить ключ ssh пользователя {{ deploy_user }}
+      ansible.posix.authorized_key:
+        user: "{{ deploy_user }}"
+        key: "{{ ssh_pubkey }}"
+        exclusive: true
+
+    - name: Разрешить {{ deploy_user }} sudo без пароля
+      ansible.builtin.copy:
+        content: "{{ deploy_user }} ALL=(ALL) NOPASSWD:ALL\n"
+        dest: "/etc/sudoers.d/{{ deploy_user }}"
+        owner: root
+        group: root
+        mode: "0440"
+        validate: /usr/sbin/visudo -cf %s
+
+    - name: UFW - входящие по умолчанию запрещены
+      community.general.ufw:
+        default: deny
+        direction: incoming
+    
+    - name: UFW - исходящие по умолчанию разрешены
+      community.general.ufw:
+        default: allow
+        direction: outgoing
+
+    - name: UFW - разрешить HTTP и HTTPS
+      community.general.ufw:
+        rule: allow
+        port: "{{ item }}"
+        proto: tcp
+      loop:
+        - "80"
+        - "443"
+    
+    - name: UFW - включить
+      community.general.ufw:
+        state: enabled
+
+    - name: Подключить репозиторий Docker
+      ansible.builtin.deb822_repository:
+        name: docker
+        types: [deb]
+        uris: ["https://download.docker.com/linux/ubuntu"]
+        suites: ["{{ ansible_facts['distribution_release'] }}"]
+        components: [stable]
+        signed_by: https://download.docker.com/linux/ubuntu/gpg
+      register: docker_repo
+ 
+    - name: Обновить кэш apt после добавления репозитория
+      ansible.builtin.apt:
+        update_cache: true
+      when: docker_repo.changed
+ 
+    - name: Установить Docker Engine и плагины
+      ansible.builtin.apt:
+        name:
+          - docker-ce
+          - docker-ce-cli
+          - containerd.io
+          - docker-buildx-plugin
+          - docker-compose-plugin
+        state: present
+ 
+    - name: Включить Docker при загрузке и запустить
+      ansible.builtin.systemd:
+        name: docker
+        enabled: true
+        state: started
+
+    - name: Добавить {{ deploy_user }} в группу docker
+      ansible.builtin.user:
+        name: "{{ deploy_user }}"
+        groups: docker
+        append: true
+
+    - name: Ужесточение sshd
+      ansible.builtin.copy:
+        dest: /etc/ssh/sshd_config.d/01-hardening.conf
+        owner: root 
+        group: root
+        mode: "0644"
+        content: |
+          PermitRootLogin no
+          PasswordAuthentication no
+          KbdInteractiveAuthentication no
+          PubkeyAuthentication yes
+          AllowUsers {{ deploy_user }}
+        validate: /usr/sbin/sshd -t -f %s
+      notify: Reload sshd
+
+  handlers:
+    - name: Reload sshd
+      ansible.builtin.systemd:
+        name: ssh
+        state: reloaded
