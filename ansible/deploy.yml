@@ -1,0 +1,70 @@
+---
+
+- name: Деплой guestbook
+  hosts: vps
+  become: true
+
+  vars_files:
+    - secrets.yml
+
+  vars:
+    deploy_user: deploy
+    app_dir: /opt/guestbook
+
+  tasks:
+    - name: Проверка на полный gha образ
+      ansible.builtin.assert:
+        that:
+          - app_tag if defined
+          - app_tag if match('^[0-9a-f]{40}$')
+        fail_msg: "Передайте полный gha образа"
+
+    - name: Создать папку проекта 
+      ansible.builtin.file:
+        path: "{{ app_dir }}"
+        state: directory
+        owner: "{{ deploy_user }}"
+        group: "{{ deploy_user }}"
+        mode: "0755"
+
+    - name: Скопировать docker-compose.yml
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/../guestbook-new/docker-compose.yml"
+        dest: "{{ app_dir }}/../guestbook-new/docker-compose.yml"
+        owner: "{{ deploy_user }}"
+        group: "{{ deploy_user }}"
+        mode: "0644"
+
+    - name: Создать .env из шаблона
+      ansible.builtin.template:
+        src: env.j2
+        dest: "{{ app_dir }}/.env"
+        owner: "{{ deploy_user }}"
+        group: "{{ deploy_user }}"
+        mode: "0644"
+      no_log: true
+
+    - name: Войти в GHCR
+      ansible.builtin.command:
+        cmd: "docker login ghcr.io -u {{ ghcr_user }} --password-stdin"
+        stdin: "{{ ghcr_token }}"
+      no_log: true
+      changed_when: false
+
+    - name: Запустить стек из образов GHCR
+      community.docker.docker_compose_v2:
+        project_src: "{{ app_dir }}" 
+        state: present
+        pull: missing
+        build: never
+        wait: true
+        wait_timeout: 120
+
+    - name: Проверить health через nginx
+      ansible.builtin.uri:
+        url: http://127.0.0.1:8080/api/health
+        status_code: 200
+      register: health
+      until: health.status == 200
+      retries: 10
+      delay: 3
