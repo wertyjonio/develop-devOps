@@ -15,7 +15,7 @@ My hands-on DevOps learning lab: containerized projects, CI pipelines, systemd a
 | **[Guestbook v1](archive_projects/docker_compose_frontend/)** | Earlier iteration of the guestbook: static HTML frontend on Nginx, Node.js API, Redis with AOF persistence and healthchecks. Superseded by the main version above (multi-stage build, Redis password, SPA routing) | Nginx, Node.js/Express, Redis, Docker Compose |
 | **[Smart Backup](archive_projects/smart-backup/)** | Backup utility in a minimal Alpine container, run on a schedule by a systemd service and timer (`Persistent=true`), host folders mounted as volumes | Bash, Docker, systemd |
 | **[Catnip](archive_projects/flask-app2/)** | Packaging a small Flask app as a custom image, publishing it to Docker Hub and deploying it to a cloud platform | Flask, Docker, Docker Hub, Render |
-| [`devops-notes/`](devops-notes/README.md) | Personal reference split by topic: Git, Linux, networking, systemd, hardening, Docker, CI/CD, interview questions and 24 Docker practice tasks (in Russian) | Markdown |
+| [`devops-notes/`](devops-notes/README.md) | Personal reference split by topic: Git, Linux, networking, systemd, hardening, Docker, CI/CD, VPS setup, Ansible, interview questions and 24 Docker practice tasks (in Russian) | Markdown |
 
 The smaller and earlier projects live in [`archive_projects/`](archive_projects/); each has its own README.
 
@@ -39,7 +39,7 @@ Run it locally:
 cd guestbook-new
 cp .env.example .env     # set your own REDIS_PASSWORD
 docker compose up -d --build
-# open http://localhost:8081
+# open http://localhost:8080
 ```
 
 ## CI/CD and automation
@@ -80,7 +80,7 @@ All workflows live in [`.github/workflows/`](.github/workflows/). Project workfl
 - **CI:** GitHub Actions workflows, path filters, job dependencies, matrix builds, scheduled runs, build caching, publishing images to GHCR, secret scanning, pinning actions by commit hash, reading and fixing failing pipelines
 - **Dependency hygiene:** Dependabot for actions, Docker images and packages
 - **Git workflow:** feature branches, pull requests, resolving merge conflicts and divergent branches
-- **Deployment:** deploying a container image to a cloud platform (Render)
+- **Deployment:** deploying a container image to a cloud platform (Render); manual deployment of a Compose stack to a VPS from GHCR images pinned by commit SHA
 - **Security hygiene:** keeping secrets out of Git, GitHub push protection, least-privilege setups
 
 ## Roadmap
@@ -93,10 +93,11 @@ All workflows live in [`.github/workflows/`](.github/workflows/). Project workfl
 - [x] CI for Todo API
 - [x] Scheduled Trivy scan and Dependabot configuration
 - [x] Branch protection for `main` (required pull request and checks)
+- [x] Manual deploy to a VPS: key-only SSH, hardened sshd, UFW, Docker Engine, images pulled from GHCR by commit SHA
 - [ ] Harden the applications (graceful shutdown, healthcheck for the frontend, pinned base images)
-- [ ] Deploy to a VPS with a domain and HTTPS (Caddy)
+- [ ] Domain and HTTPS (Caddy)
 - [ ] Continuous delivery: deploy to the server from GitHub Actions, rollback by commit tag
-- [ ] Automate server setup with Ansible
+- [ ] Automate server setup and deployment with Ansible (playbooks written, being tested on a fresh VPS)
 - [ ] Provision infrastructure with Terraform
 - [ ] Monitoring with Prometheus and Grafana
 - [ ] Kubernetes basics (k3s / minikube)
@@ -114,7 +115,7 @@ All workflows live in [`.github/workflows/`](.github/workflows/). Project workfl
 │   ├── docker-compose2/           # Todo API
 │   ├── flask-app2/                # Catnip
 │   └── smart-backup/              # Smart Backup
+├── ansible/                    # playbooks: server setup (site.yml) and app deployment (deploy.yml)
 ├── devops-notes/               # personal reference notes and Docker practice tasks
 └── README.md
-
 ```
