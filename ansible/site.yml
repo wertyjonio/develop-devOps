@@ -20,7 +20,7 @@
           - curl 
           - ca-certificates
           - tmux
-
+          - python3-debian
     - name: Создать пользователя {{deploy_user}}
       ansible.builtin.user:
         name: "{{ deploy_user }}"
