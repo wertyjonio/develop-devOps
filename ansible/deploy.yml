@@ -15,26 +15,26 @@
     - name: Проверка на полный gha образ
       ansible.builtin.assert:
         that:
-          - app_tag if defined
-          - app_tag if match('^[0-9a-f]{40}$')
-        fail_msg: "Передайте полный gha образа"
+          - app_tag is defined
+          - app_tag is match('^[0-9a-f]{40}$')
+        fail_msg: "Переменная app_tag не задана или не соответствует формату полного SHA (40 hex-символов)."
 
-    - name: Создать папку проекта 
+    - name: Создать папку для нового релиза
       ansible.builtin.file:
-        path: "{{ app_dir }}"
+        path: /opt/guestbook-new
         state: directory
-        owner: "{{ deploy_user }}"
-        group: "{{ deploy_user }}"
+        owner: deploy
+        group: deploy
         mode: "0755"
 
     - name: Скопировать docker-compose.yml
       ansible.builtin.copy:
         src: "{{ playbook_dir }}/../guestbook-new/docker-compose.yml"
-        dest: "{{ app_dir }}/../guestbook-new/docker-compose.yml"
+        dest: "{{ app_dir }}/docker-compose.yml"
         owner: "{{ deploy_user }}"
         group: "{{ deploy_user }}"
         mode: "0644"
-
+        
     - name: Создать .env из шаблона
       ansible.builtin.template:
         src: env.j2

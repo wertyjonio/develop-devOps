@@ -52,7 +52,7 @@
         default: allow
         direction: outgoing
 
-    - name: UFW - разрешить HTTP и HTTPS
+    - name: UFW - разрешить HTTP и HTTPS и SSH
       community.general.ufw:
         rule: allow
         port: "{{ item }}"
@@ -60,6 +60,7 @@
       loop:
         - "80"
         - "443"
+        - "22"
     
     - name: UFW - включить
       community.general.ufw:
@@ -101,6 +102,14 @@
         name: "{{ deploy_user }}"
         groups: docker
         append: true
+
+    - name: Создать директорию /run/sshd
+      ansible.builtin.file:
+        path: /run/sshd
+        state: directory
+        owner: root
+        group: root 
+        mode: '0755'
 
     - name: Ужесточение sshd
       ansible.builtin.copy:
