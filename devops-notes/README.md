@@ -15,7 +15,7 @@
 | [05-network.md](05-network.md) | Интерфейсы, маршруты, bridge, диагностика, tcpdump |
 | [06-security.md](06-security.md) | Hardening нового сервера: SSH-ключи, sshd, UFW |
 | [07-docker.md](07-docker.md) | Docker, Dockerfile, Compose, healthcheck, hardening, Trivy, диагностика |
-| [08-cicd.md](08-cicd.md) | GitHub Actions, пайплайн для Docker, GHCR, безопасность CI, каталог ошибок, основы CD, Dependabot |
+| [08-cicd.md](08-cicd.md) | GitHub Actions, пайплайн для Docker, GHCR, безопасность CI, каталог ошибок, CD: деплой на сервер из Actions через Ansible и откат по sha, команды `gh`, Dependabot |
 | [09-interview-questions.md](09-interview-questions.md) | Вопросы для собеседований по Docker и CI |
 | [10-vps-setup.md](10-vps-setup.md) | Первичная настройка VPS по шагам: вход по ключу, пользователь `deploy`, hardening `sshd`, UFW, обход UFW в Docker, установка Docker, keepalive и `tmux` против обрывов SSH, ручной деплой из GHCR, обновление и откат по sha, чек-лист для пересоздания почасового VPS, каталог ошибок |
 | [11-ansible.md](11-ansible.md) | Ansible: принцип работы, идемпотентность, сравнение с CI, compose, bash и Terraform, inventory и плейбук, модули, шпаргалка команд, vault, каталог ошибок |
