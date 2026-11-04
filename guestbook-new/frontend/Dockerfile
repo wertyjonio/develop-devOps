@@ -1,4 +1,4 @@
-FROM node:24.22.0-alpine AS build
+FROM node:26.13.0-alpine AS build
 WORKDIR /build
 COPY package*.json ./
 RUN npm ci
@@ -7,6 +7,7 @@ RUN npm run build
 
 FROM nginxinc/nginx-unprivileged:1.31.6-alpine
 USER root
+# hadolint ignore=DL3017
 RUN apk upgrade --no-cache
 USER nginx
 COPY nginx.conf /etc/nginx/conf.d/default.conf
