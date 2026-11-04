@@ -1,0 +1,106 @@
+name: deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Full commit SHA (40 chars) of the images to deploy. Empty = HEAD of the selected branch"
+        required: false
+        type: string
+      host:
+        description: "VPS IP or hostname. Empty = repository variable VPS_HOST"
+        required: false
+        type: string
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  DOMAIN: guestbook-new.duckdns.org
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: production
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Resolve tag and host
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
+          INPUT_HOST: ${{ inputs.host }}
+          VAR_HOST: ${{ vars.VPS_HOST }}
+        run: |
+          TAG="${INPUT_TAG:-$GITHUB_SHA}"
+          HOST="${INPUT_HOST:-$VAR_HOST}"
+          if ! [[ "$TAG" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::tag must be a full 40-char commit SHA, got: $TAG"
+            exit 1
+          fi
+          if [ -z "$HOST" ]; then
+            echo "::error::set the VPS_HOST variable or pass the host input"
+            exit 1
+          fi
+          echo "TAG=$TAG" >> "$GITHUB_ENV"
+          echo "HOST=$HOST" >> "$GITHUB_ENV"
+
+      - name: Log in to GHCR (read-only)
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Check that images exist for this tag
+        run: |
+          OWNER="${GITHUB_REPOSITORY_OWNER,,}"
+          docker buildx imagetools inspect "ghcr.io/$OWNER/guestbook-api:$TAG" > /dev/null
+          docker buildx imagetools inspect "ghcr.io/$OWNER/guestbook-frontend:$TAG" > /dev/null
+
+      - name: Install Ansible
+        run: |
+          pipx install "ansible-core>=2.18,<2.19"
+          ansible-galaxy collection install community.docker
+
+      - name: Prepare SSH, Ansible variables and inventory
+        env:
+          SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          REDIS_PASSWORD: ${{ secrets.REDIS_PASSWORD }}
+          GHCR_USER: ${{ github.actor }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          umask 077
+          mkdir -p ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/deploy_key
+          ssh-keyscan -T 10 "$HOST" >> ~/.ssh/known_hosts
+          test -s ~/.ssh/known_hosts
+          jq -n \
+            --arg redis_password "$REDIS_PASSWORD" \
+            --arg ghcr_user "$GHCR_USER" \
+            --arg ghcr_token "$GHCR_TOKEN" \
+            '$ARGS.named' > "$RUNNER_TEMP/extra_vars.json"
+          printf '[vps]\n%s ansible_user=deploy ansible_ssh_private_key_file=%s\n' \
+            "$HOST" "$HOME/.ssh/deploy_key" > "$RUNNER_TEMP/inventory.ini"
+
+      - name: Deploy with Ansible
+        working-directory: ansible
+        run: |
+          ansible-playbook \
+            -i "$RUNNER_TEMP/inventory.ini" \
+            deploy.yml \
+            -e "app_tag=$TAG" \
+            -e "@$RUNNER_TEMP/extra_vars.json"
+
+      - name: Check the public site through Caddy
+        run: |
+          curl -fsS --retry 10 --retry-delay 3 --retry-connrefused --max-time 10 \
+            "https://$DOMAIN/api/health"
+          echo "Deployed \`$TAG\` to https://$DOMAIN" >> "$GITHUB_STEP_SUMMARY"
