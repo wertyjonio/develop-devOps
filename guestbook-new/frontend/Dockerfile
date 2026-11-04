@@ -7,7 +7,8 @@ RUN npm run build
 
 FROM nginxinc/nginx-unprivileged:1.31.6-alpine
 USER root
-RUN apk upgrade --no-cache libexpat
+# hadolint ignore=DL3017
+RUN apk upgrade --no-cache
 USER nginx
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 COPY --from=build /build/dist /usr/share/nginx/html/
