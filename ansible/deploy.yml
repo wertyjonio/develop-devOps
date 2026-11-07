@@ -4,27 +4,27 @@
   hosts: vps
   become: true
 
-  vars_files:
-    - secrets.yml
-
   vars:
     deploy_user: deploy
     app_dir: /opt/guestbook
 
   tasks:
-    - name: Проверка на полный gha образ
+    - name: Проверить входные переменные
       ansible.builtin.assert:
         that:
           - app_tag is defined
           - app_tag is match('^[0-9a-f]{40}$')
-        fail_msg: "Переменная app_tag не задана или не соответствует формату полного SHA (40 hex-символов)."
+          - redis_password is defined
+          - ghcr_user is defined
+          - ghcr_token is defined
+        fail_msg: "Нужны app_tag (полный SHA, 40 hex-символов), redis_password, ghcr_user и ghcr_token."
 
-    - name: Создать папку для нового релиза
+    - name: Создать папку приложения
       ansible.builtin.file:
-        path: /opt/guestbook-new
+        path: "{{ app_dir }}"
         state: directory
-        owner: deploy
-        group: deploy
+        owner: "{{ deploy_user }}"
+        group: "{{ deploy_user }}"
         mode: "0755"
 
     - name: Скопировать docker-compose.yml
@@ -34,14 +34,14 @@
         owner: "{{ deploy_user }}"
         group: "{{ deploy_user }}"
         mode: "0644"
-        
+
     - name: Создать .env из шаблона
       ansible.builtin.template:
         src: env.j2
         dest: "{{ app_dir }}/.env"
         owner: "{{ deploy_user }}"
         group: "{{ deploy_user }}"
-        mode: "0644"
+        mode: "0600"
       no_log: true
 
     - name: Войти в GHCR
@@ -53,7 +53,7 @@
 
     - name: Запустить стек из образов GHCR
       community.docker.docker_compose_v2:
-        project_src: "{{ app_dir }}" 
+        project_src: "{{ app_dir }}"
         state: present
         pull: missing
         build: never
