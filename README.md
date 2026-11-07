@@ -98,6 +98,7 @@ All workflows live in [`.github/workflows/`](.github/workflows/). Project workfl
 - **Git workflow:** feature branches, pull requests, resolving merge conflicts and divergent branches
 - **Deployment:** deploying a container image to a cloud platform (Render); manual deployment of a Compose stack to a VPS from GHCR images pinned by commit SHA; free domain (DuckDNS) with automatic HTTPS through Caddy
 - **Configuration management:** Ansible playbooks, templates (Jinja2) and handlers for repeatable server setup
+- **CD:** manual-trigger deploy workflow with a dedicated CI SSH key, GitHub Secrets and variables, image existence check before deploy, end-to-end HTTPS check, rollback by commit SHA
 - **Security hygiene:** keeping secrets out of Git, GitHub push protection, least-privilege setups
 
 ## Roadmap
@@ -113,8 +114,8 @@ All workflows live in [`.github/workflows/`](.github/workflows/). Project workfl
 - [x] Manual deploy to a VPS: key-only SSH, hardened sshd, UFW, Docker Engine, images pulled from GHCR by commit SHA
 - [x] Harden the applications (graceful shutdown, healthcheck for the frontend, pinned base images)
 - [x] Domain and HTTPS (Caddy, free DuckDNS domain)
-- [ ] Continuous delivery: deploy to the server from GitHub Actions, rollback by commit tag (workflow written, waiting for the first run on a fresh VPS)
-- [x] Automate server setup and deployment with Ansible (playbooks written, being tested on a fresh VPS)
+- [x] Continuous delivery: deploy to the server from GitHub Actions (SSH key for CI, Ansible), rollback by commit SHA
+- [x] Automate server setup and deployment with Ansible (server setup and app deployment playbooks, tested on a fresh VPS)
 - [ ] Provision infrastructure with Terraform
 - [ ] Monitoring with Prometheus and Grafana
 - [ ] Kubernetes basics (k3s / minikube)
