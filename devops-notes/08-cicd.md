@@ -174,7 +174,7 @@ publish:
 
 - Тег `latest` удобен, тег с `github.sha` нужен для **точного отката** и воспроизводимости.
 - Адрес реестра `ghcr.io` (опечатка `ghrc.io` даёт `denied`). Имя образа должно быть в нижнем регистре.
-- **Образы публикуются только когда сработал `publish`**: у `guestbook-ci` на push в `main` стоит фильтр `paths`, поэтому коммит, не менявший `guestbook-new/`, образов не создаёт. SHA для деплоя берут у коммита, который их публиковал: `git log -1 --format=%H -- guestbook-new`.
+- **Образы публикуются только когда сработал `publish`**: у `guestbook-ci` на push в `main` стоит фильтр `paths`, поэтому коммит, не менявший `guestbook-new/`, образов не создаёт. SHA для деплоя берут у коммита, который их публиковал: `git log -1 --first-parent --format=%H -- guestbook-new`. Это **merge-коммит PR в `main`**: именно он запускает `publish`. Коммит из feature-ветки образов не имеет, а команда без `--first-parent` может вернуть как раз его.
 - Проверить, что образ с тегом существует, не скачивая его: `docker buildx imagetools inspect ghcr.io/<owner>/guestbook-api:<sha>`.
 - На сервере вход в GHCR вручную: токен (PAT) с правом `read:packages`, `docker login ghcr.io -u <user>`. В автоматическом деплое (раздел 8) вместо PAT используется короткий `GITHUB_TOKEN` самого запуска: он не истекает «через 30 дней» и не лежит нигде постоянно.
 - **Параметры `build-push-action`:** `context` (папка сборки, как `build:` в Compose), `push: true` (отправить в реестр), `load: true` (загрузить собранный образ в локальный Docker раннера, нужно для сканирования; Buildx по умолчанию не кладёт образ в `docker images`), `tags` (имена), `cache-from` / `cache-to` (кэш слоёв в хранилище GitHub Actions; `scope` разделяет кэш разных образов, `mode=max` сохраняет и промежуточные стадии), `no-cache: true` (не использовать кэш вообще).
@@ -190,6 +190,7 @@ publish:
 - **Секреты:** никогда не в Git. Для CI используются GitHub Secrets (`${{ secrets.NAME }}`) и тестовые значения из `.env.example`. Если секрет попал в историю, удаления файла недостаточно: ключ нужно **перевыпустить**.
 - **Минимальные права токена:** `permissions: contents: read` на уровне workflow; расширенные права (`packages: write`) только в том job, которому они нужны. Указанное в `permissions` ограничивает всё остальное до `none`.
 - **Секреты и ввод пользователя в `run:`** передаются через `env:`, а не подставляются в команду как `${{ ... }}`. Иначе значение с кавычками или `;` превращается в код (инъекция команд).
+- **Файлы редакторов не коммитить** (`*.swp`, `*.swo`, `*~`): swap-файл vim от открытого `secrets.yml` может содержать куски секретов открытым текстом. Добавить в `.gitignore`. Если файл уже попал в коммит, он остаётся в истории: проверить `git log --all --oneline -- <файл>` и `git show <коммит>:<файл> | strings | head`, при утечке секреты перевыпустить.
 - **Сканирование секретов:** `gitleaks` с `fetch-depth: 0` (нужна вся история, а не последний коммит) на каждый пуш и PR.
 - **Закрепление экшенов по хэшу коммита** (`uses: owner/action@<40 символов> # v1.2.3`): тег можно переместить на другой код, хэш нельзя. Минимум для экшенов безопасности (Trivy).
 - **Dependabot** (`.github/dependabot.yml`) раз в неделю открывает PR с обновлениями:
@@ -305,7 +306,7 @@ Run workflow (tag = SHA) → проверка формата SHA → образ�
 
 - **Запуск:** Actions → deploy → Run workflow; в `tag` вставить SHA, в `host` при необходимости IP.
 - **Откат:** запустить тот же workflow со старым SHA. Пересборка не нужна, образ лежит в GHCR. Откат по `latest` невозможен: плавающий тег не указывает на прошлую версию.
-- **Где взять SHA:** `git log -1 --format=%H -- guestbook-new` (последний коммит, публиковавший образы) или GitHub → Packages → теги образа.
+- **Где взять SHA:** `git log -1 --first-parent --format=%H -- guestbook-new` (последний merge-коммит в `main`, менявший `guestbook-new/`) или GitHub → Packages → теги образа. Запуск без `tag` берёт HEAD `main`, а у него образов может не быть (если последние коммиты не трогали `guestbook-new/`), тогда сработает проверка `imagetools inspect`.
 - **Локально без GitHub** (удобно, чтобы отделить ошибки плейбука от ошибок workflow):
 
   ```bash
@@ -323,11 +324,11 @@ Run workflow (tag = SHA) → проверка формата SHA → образ�
 
 Новый сервер = новый отпечаток SSH; `ssh-keyscan` в workflow его подхватывает. Не забывать про лимиты Let's Encrypt при частых пересозданиях: сертификат запрашивается заново (см. [10-vps-setup.md](10-vps-setup.md)).
 
-### Типичные ошибки CD (дополнять по ходу первых запусков)
+### Ошибки CD (часть из них встретилась на первых запусках)
 
 | Симптом | Вероятная причина | Решение |
 |---------|-------------------|---------|
-| падает шаг `imagetools inspect` | для SHA нет образов (коммит не менял `guestbook-new/`) или нет прав `packages: read` | взять SHA из `git log -1 --format=%H -- guestbook-new`, проверить Packages и `permissions` |
+| падает шаг `imagetools inspect` | для SHA нет образов (коммит не менял `guestbook-new/`) или нет прав `packages: read` | взять SHA из `git log -1 --first-parent --format=%H -- guestbook-new` (у merge-коммита), проверить Packages и `permissions` |
 | `test -s ~/.ssh/known_hosts` красный | сервер не запущен, неверный `VPS_HOST`, закрыт порт 22 | проверить IP и UFW |
 | `Permission denied (publickey)` | ключа CI нет на сервере (не прогнан `site.yml`) или в секрет попал не весь ключ | прогнать `site.yml`, пересоздать секрет из файла целиком |
 | после повторного прогона `site.yml` CI перестал заходить | в `authorized_key` с `exclusive: true` не указан `ci_pubkey` | передавать оба ключа через `\n` |
@@ -335,6 +336,40 @@ Run workflow (tag = SHA) → проверка формата SHA → образ�
 | `secrets.yml` not found | в плейбуке остался `vars_files: secrets.yml`, а файла на раннере нет | убрать `vars_files`, передавать секреты через `-e` |
 | `unauthorized` при `docker compose pull` на сервере | у `GITHUB_TOKEN` нет доступа к пакету | проверить, что образ связан с репозиторием (label `org.opencontainers.image.source`) и права `packages: read` |
 | финальный `curl` красный | DNS на старом IP, Caddy не получил сертификат (закрыт порт 80), стек не healthy | `journalctl -u caddy` на сервере, `docker compose ps` |
+| `Destination directory /opt/guestbook does not exist`, в логе старые названия задач | в `main` лежит старая версия `ansible/deploy.yml`: исправленный файл был только локально | смержить исправление в `main` или запустить workflow из ветки (`gh workflow run deploy.yml --ref <ветка> -f tag=...`); сверять версию в `main`, а не локальную |
+| `curl: (35) ... tlsv1 alert internal error` на последнем шаге, а деплой прошёл | у Caddy нет сертификата для домена | раздел «Caddy не выдаёт сертификат» ниже |
+| в логе Caddy `invalidContact ... unable to parse email address` | в строке `email` Caddyfile стоит не почта (в шаблоне вместо `{{ caddy_email }}` был домен) | поправить `Caddyfile.j2`, прогнать `site.yml`, хендлер перезагрузит Caddy |
+| в логе шага `curl` повторяется дважды | опечатка при переписывании: после `\` вторая `curl` | оставить одну команду |
+| снаружи не открывается `http://IP:8080` | так и задумано: порт слушает только `127.0.0.1` | проверять домен, а не порт |
+
+### Caddy не выдаёт сертификат
+
+Симптом: деплой зелёный, но `curl https://домен` даёт `tlsv1 alert internal error` или сайт не открывается.
+
+```bash
+dig +short guestbook-new.duckdns.org                  # должен вернуть IP текущего сервера
+nc -vz <IP> 80; nc -vz <IP> 443                       # порты доступны снаружи
+ssh deploy@<IP> 'sudo cat -A /etc/caddy/Caddyfile'    # видны скрытые символы; в email должна быть почта
+ssh deploy@<IP> 'sudo journalctl -u caddy --no-pager -n 40 | grep -i "certificate\|error"'
+```
+
+Признак успеха в логе: `certificate obtained successfully`. Предупреждение `no OCSP stapling` безобидно; `context canceled` при перезагрузке Caddy тоже (он просто начинает новую попытку). Caddy повторяет неудачные попытки с растущей паузой, `systemctl reload caddy` запускает новую сразу. Ошибка на этапе регистрации аккаунта (`invalidContact`) на недельный лимит Let's Encrypt не влияет.
+
+### Как проверить, что деплой сработал
+
+```bash
+# на сервере
+cd /opt/guestbook
+docker compose ps                         # redis и api healthy, frontend running
+grep TAG .env                             # SHA, который деплоили
+curl -s http://127.0.0.1:8080/api/health
+
+# снаружи
+curl -I https://guestbook-new.duckdns.org
+curl --max-time 5 http://<IP>:8080        # НЕ должен отвечать
+```
+
+Затем: оставить сообщение в гостевой книге, выкатить новый SHA (изменение видно на сайте), откатиться на старый SHA (сайт вернулся, сообщение осталось, так как данные Redis лежат в томе). Негативные проверки: `tag=abc` падает на проверке формата, SHA без образов падает на `imagetools inspect` до подключения к серверу.
 
 ### Что можно добавить дальше
 
