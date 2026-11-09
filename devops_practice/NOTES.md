@@ -6,3 +6,6 @@ HEALHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
 (нужен для того, чтобы при docker ps видеть статус контейнера)
 
 Документация: hub.docker.com - ищем образы, примеры их сборок и тд
+
+## 2 (multi-stage)
+COPY --from=build /app/dist /usr/share/nginx/html - используем файлы, которые создались после работы билдера
