@@ -9,3 +9,5 @@ HEALHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
 
 ## 2 (multi-stage)
 COPY --from=build /app/dist /usr/share/nginx/html - используем файлы, которые создались после работы билдера
+USER в scratch пишем <10000
+в scratch запускаем скрипты по абсолютному пути ["/server"]
