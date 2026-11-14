@@ -24,3 +24,8 @@ FastAPI/uvicorn, Django	8000
 Flask	        5000
 Node/Express	3000
 Spring Boot, Tomcat	8080
+
+## 3 docker-compose
+Healthcheck: код выхода 0 = healthy; `CMD-SHELL` нужен для `|` и переменных (`$$VAR`); `start_period` не считает провалы при старте.
+`depends_on` без условия ждёт только запуск контейнера, `service_healthy` ждёт готовность сервиса.
+Хост в URL подключения = имя сервиса из compose, не `localhost`; внутри сети используется внутренний порт, `ports` нужен только для доступа с хоста.
