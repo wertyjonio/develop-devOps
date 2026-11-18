@@ -52,3 +52,5 @@ Healthcheck: код выхода 0 = healthy; `CMD-SHELL` нужен для `|` 
 Сборка и пуш Docker-образов в CI                                            docs.docker.com/build/ci/github-actions/
 Публикация в GHCR	                                                          docs.github.com/packages, раздел про Container registry
 Переменные, секреты, контексты (${{ secrets.X }}, github.ref)             	docs.github.com/actions, разделы Secrets и Contexts
+
+**CI для DevOps:** главное, чтобы всё собиралось, поднималось и отвечало. Smoke test = один сквозной сценарий через весь стек, а не глубокая проверка логики. Логику проверяют юнит-тесты разработчиков. Smoke-скрипт лучше держать отдельным файлом (`scripts/smoke.sh`), чтобы запускать его и локально, и в CI.
