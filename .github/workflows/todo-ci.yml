@@ -30,7 +30,7 @@ jobs:
       - uses: actions/checkout@v7
 
       - name: Lint Dockerfile
-        uses: hadolint/hadolint-action@v3.1.0
+        uses: hadolint/hadolint-action@v3.5.0
         with:
           dockerfile: "archive_projects/docker-compose2/app/Dockerfile"
 
