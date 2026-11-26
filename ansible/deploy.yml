@@ -15,9 +15,10 @@
           - app_tag is defined
           - app_tag is match('^[0-9a-f]{40}$')
           - redis_password is defined
+          - grafana_admin_password is defined         
           - ghcr_user is defined
           - ghcr_token is defined
-        fail_msg: "Нужны app_tag (полный SHA, 40 hex-символов), redis_password, ghcr_user и ghcr_token."
+        fail_msg: "Нужны app_tag (полный SHA, 40 hex-символов), redis_password, grafana_admin_password, ghcr_user и ghcr_token."
 
     - name: Создать папку приложения
       ansible.builtin.file:
@@ -34,6 +35,26 @@
         owner: "{{ deploy_user }}"
         group: "{{ deploy_user }}"
         mode: "0644"
+
+    - name: Скопировать конфиг Prometheus               
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/../guestbook-new/prometheus/"
+        dest: "{{ app_dir }}/prometheus/"
+        owner: "{{ deploy_user }}"
+        group: "{{ deploy_user }}"
+        mode: "0644"
+        directory_mode: "0755"
+      register: prometheus_cfg
+
+    - name: Скопировать provisioning и дашборды Grafana  
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/../guestbook-new/grafana/"
+        dest: "{{ app_dir }}/grafana/"
+        owner: "{{ deploy_user }}"
+        group: "{{ deploy_user }}"
+        mode: "0644"
+        directory_mode: "0755"
+      register: grafana_cfg
 
     - name: Создать .env из шаблона
       ansible.builtin.template:
@@ -58,7 +79,16 @@
         pull: missing
         build: never
         wait: true
+        wait_timeout: 180                               
+
+    - name: Перезапустить Prometheus и Grafana при смене конфигов  
+      community.docker.docker_compose_v2:
+        project_src: "{{ app_dir }}"
+        services: [prometheus, grafana]
+        state: restarted
+        wait: true
         wait_timeout: 120
+      when: prometheus_cfg.changed or grafana_cfg.changed
 
     - name: Проверить health через nginx
       ansible.builtin.uri:
@@ -66,5 +96,14 @@
         status_code: 200
       register: health
       until: health.status == 200
+      retries: 10
+      delay: 3
+
+    - name: Проверить health Grafana                     
+      ansible.builtin.uri:
+        url: http://127.0.0.1:3000/api/health
+        status_code: 200
+      register: grafana_health
+      until: grafana_health.status == 200
       retries: 10
       delay: 3
