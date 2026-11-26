@@ -1,5 +1,6 @@
 const express = require("express");
 const { createClient } = require("redis");
+const client = require("prom-client");
 
 // Настройки берём из переменных окружения (их будет задавать docker-compose)
 const PORT = Number(process.env.PORT) || 3000;
@@ -7,6 +8,7 @@ const REDIS_HOST = process.env.REDIS_HOST || "localhost";
 const REDIS_PORT = Number(process.env.REDIS_PORT) || 6379;
 // Пароль от Redis (если не задан, клиент подключается без пароля)
 const REDIS_PASSWORD = process.env.REDIS_PASSWORD || undefined;
+const METRICS_PORT = Number(process.env.METRICS_PORT) || 9100;
 
 const MESSAGES_KEY = "messages";
 const VISITS_KEY = "visits";
@@ -25,6 +27,42 @@ app.use(express.json({ limit: "10kb" }));
 
 // Обёртка, чтобы ошибки async-обработчиков попадали в общий обработчик ошибок
 const wrap = (fn) => (req, res, next) => fn(req, res, next).catch(next);
+
+client.collectDefaultMetrics(); // память, CPU, event loop, GC самого Node.js
+
+const httpDuration = new client.Histogram({
+  name: "http_request_duration_seconds",
+  help: "Длительность HTTP-запросов",
+  labelNames: ["method", "route", "status"],
+});
+
+const messagesCreated = new client.Counter({
+  name: "guestbook_messages_created_total",
+  help: "Сколько сообщений оставлено в гостевой книге",
+});
+
+app.use((req, res, next) => {
+  const end = httpDuration.startTimer();
+  res.on("finish", () => {
+    end({
+      method: req.method,
+      route: req.route ? req.route.path : "unmatched",
+      status: res.statusCode,
+    });
+  });
+  next();
+});
+
+// Отдельное приложение и порт для метрик: Nginx про 9100 не знает,
+// поэтому наружу через /api/metrics они не попадут
+const metricsApp = express();
+metricsApp.get(
+  "/metrics",
+  wrap(async (req, res) => {
+    res.set("Content-Type", client.register.contentType);
+    res.end(await client.register.metrics());
+  })
+);
 
 app.get("/health", async (req, res) => {
   try {
@@ -82,6 +120,7 @@ app.post(
     const message = { name, text, createdAt: new Date().toISOString() };
     await redis.lPush(MESSAGES_KEY, JSON.stringify(message));
     await redis.lTrim(MESSAGES_KEY, 0, MAX_MESSAGES - 1); // храним только последние 50
+    messagesCreated.inc();
     res.status(201).json(message);
   })
 );
@@ -96,6 +135,7 @@ app.use((err, req, res, next) => {
 /* ---------- Корректная остановка ---------- */
 
 let server;
+let metricsServer;
 let shuttingDown = false;
 
 async function shutdown(signal) {
@@ -111,13 +151,15 @@ async function shutdown(signal) {
   }, 8000).unref();
 
   try {
-    if (server) {
-      // перестать принимать новые соединения и дождаться текущих запросов
-      await new Promise((resolve, reject) => {
-        server.close((err) => (err ? reject(err) : resolve()));
-        server.closeIdleConnections(); // не ждать «спящие» keep-alive соединения
-      });
-    }
+    await Promise.all(
+      [server, metricsServer].filter(Boolean).map(
+        (srv) =>
+          new Promise((resolve, reject) => {
+            srv.close((err) => (err ? reject(err) : resolve()));
+            srv.closeIdleConnections();
+          })
+      )
+    );
     if (redis.isOpen) await redis.quit(); // дождаться выполнения команд и закрыть соединение
     console.log("Остановлен корректно");
     process.exit(0);
@@ -134,5 +176,9 @@ process.on("SIGINT", () => shutdown("SIGINT")); // Ctrl+C
   // connect() сам повторяет попытки, пока Redis не поднимется
   await redis.connect();
   console.log(`Подключено к Redis ${REDIS_HOST}:${REDIS_PORT}`);
-  server = app.listen(PORT, "0.0.0.0", () => console.log(`API слушает порт ${PORT}`));
+  server = app.listen(PORT, "0.0.0.0", () => console.log(`API слушает порт ${PORT}`));  
+  metricsServer = metricsApp.listen(METRICS_PORT, "0.0.0.0", () =>
+    console.log(`Метрики на порту ${METRICS_PORT}`)
+  );
 })();
+
