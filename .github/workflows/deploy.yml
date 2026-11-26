@@ -74,6 +74,7 @@ jobs:
         env:
           SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
           REDIS_PASSWORD: ${{ secrets.REDIS_PASSWORD }}
+          GRAFANA_ADMIN_PASSWORD: ${{ secrets.GRAFANA_ADMIN_PASSWORD }}
           GHCR_USER: ${{ github.actor }}
           GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -84,6 +85,7 @@ jobs:
           test -s ~/.ssh/known_hosts
           jq -n \
             --arg redis_password "$REDIS_PASSWORD" \
+            --arg grafana_admin_password "$GRAFANA_ADMIN_PASSWORD" \
             --arg ghcr_user "$GHCR_USER" \
             --arg ghcr_token "$GHCR_TOKEN" \
             '$ARGS.named' > "$RUNNER_TEMP/extra_vars.json"
@@ -104,3 +106,8 @@ jobs:
           curl -fsS --retry 10 --retry-delay 3 --retry-connrefused --max-time 10 \
             "https://$DOMAIN/api/health"
           echo "Deployed \`$TAG\` to https://$DOMAIN" >> "$GITHUB_STEP_SUMMARY"
+      
+      - name: Check that metrics are not exposed publicly
+        run: |
+          code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 "https://$DOMAIN/api/metrics")
+          test "$code" = "404"

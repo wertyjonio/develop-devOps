@@ -1,6 +1,6 @@
 # develop-devOps
 
-My hands-on DevOps learning lab: containerized projects, CI pipelines, systemd automation and a personal Linux/Docker reference. I'm learning DevOps by building things, breaking them and writing down what I figure out.
+My hands-on DevOps learning lab: containerized projects, CI pipelines, systemd automation, monitoring and a personal Linux/Docker reference. I'm learning DevOps by building things, breaking them and writing down what I figure out.
 
 [![guestbook-ci](https://github.com/wertyjonio/develop-devOps/actions/workflows/guestbook-ci.yml/badge.svg)](https://github.com/wertyjonio/develop-devOps/actions/workflows/guestbook-ci.yml)
 [![todo-ci](https://github.com/wertyjonio/develop-devOps/actions/workflows/todo-ci.yml/badge.svg)](https://github.com/wertyjonio/develop-devOps/actions/workflows/todo-ci.yml)
@@ -10,12 +10,12 @@ My hands-on DevOps learning lab: containerized projects, CI pipelines, systemd a
 
 | Project | What it demonstrates | Stack |
 |---------|----------------------|-------|
-| **[Guestbook](guestbook-new/)** (main project) | Three-container app behind a reverse proxy: multi-stage builds, healthchecks, internal-only services, persistent storage, hardened containers, CI pipeline with image publishing; deployed to a VPS with automatic HTTPS via Caddy | Vite, Node.js/Express, Redis, Nginx, Caddy, Docker Compose, GitHub Actions |
+| **[Guestbook](guestbook-new/)** (main project) | Three-container app behind a reverse proxy: multi-stage builds, healthchecks, internal-only services, persistent storage, hardened containers, CI pipeline with image publishing, monitoring with provisioned Grafana dashboards; deployed to a VPS with automatic HTTPS via Caddy | Vite, Node.js/Express, Redis, Nginx, Caddy, Prometheus, Grafana, Docker Compose, GitHub Actions |
 | **[Todo API](archive_projects/docker-compose2/)** | REST API with a database, startup ordering via healthchecks, config kept out of code (`.env`), layer caching, CI with a smoke test | Flask, PostgreSQL 16, Docker Compose, GitHub Actions |
 | **[Guestbook v1](archive_projects/docker_compose_frontend/)** | Earlier iteration of the guestbook: static HTML frontend on Nginx, Node.js API, Redis with AOF persistence and healthchecks. Superseded by the main version above (multi-stage build, Redis password, SPA routing) | Nginx, Node.js/Express, Redis, Docker Compose |
 | **[Smart Backup](archive_projects/smart-backup/)** | Backup utility in a minimal Alpine container, run on a schedule by a systemd service and timer (`Persistent=true`), host folders mounted as volumes | Bash, Docker, systemd |
 | **[Catnip](archive_projects/flask-app2/)** | Packaging a small Flask app as a custom image, publishing it to Docker Hub and deploying it to a cloud platform | Flask, Docker, Docker Hub, Render |
-| [`devops-notes/`](devops-notes/README.md) | Personal reference split by topic: Git, Linux, networking, systemd, hardening, Docker, CI/CD, VPS setup, Ansible, interview questions and 24 Docker practice tasks (in Russian) | Markdown |
+| [`devops-notes/`](devops-notes/README.md) | Personal reference split by topic: Git, Linux, networking, systemd, hardening, Docker, CI/CD, VPS setup, Ansible, monitoring, interview questions and 24 Docker practice tasks (in Russian) | Markdown |
 
 The smaller and earlier projects live in [`archive_projects/`](archive_projects/); each has its own README.
 
@@ -24,23 +24,36 @@ The smaller and earlier projects live in [`archive_projects/`](archive_projects/
 ```
 browser ──> frontend (nginx) ──/api/──> api (node :3000) ──> redis (:6379)
             only published port          internal only        internal only
+
+prometheus ──scrapes──> api, redis-exporter, node-exporter ──> grafana (dashboards)
 ```
 
 - Multi-stage Docker build: Node builds the Vite app, the final image contains only Nginx and static files.
 - Nginx serves the SPA (with a fallback for client-side routes) and acts as a reverse proxy for the API.
 - Redis is password-protected, uses AOF persistence and a named volume, and is not reachable from outside the Compose network.
 - Startup order is driven by healthchecks, not just container start.
-- Hardened containers: non-root users, all Linux capabilities dropped, read-only filesystems, memory and CPU limits, log rotation, and two isolated networks so the frontend cannot reach Redis.
+- Hardened containers: non-root users, all Linux capabilities dropped, read-only filesystems, memory and CPU limits, log rotation, and isolated networks so the frontend cannot reach Redis.
+- Monitoring: Prometheus scrapes the API, Redis (through an exporter) and the host (node-exporter); Grafana is configured entirely from files (data source and dashboard provisioning), so the whole stack comes up with a ready dashboard after `docker compose up`.
 - Secrets live in `.env` (git-ignored); a safe `.env.example` template is committed.
 
 Run it locally:
 
 ```bash
 cd guestbook-new
-cp .env.example .env     # set your own REDIS_PASSWORD
+cp .env.example .env     # set your own REDIS_PASSWORD and GRAFANA_ADMIN_PASSWORD
 docker compose up -d --build
-# open http://localhost:8080
+# app:     http://localhost:8080
+# Grafana: http://localhost:3000  (user admin, password from .env)
 ```
+
+## Monitoring
+
+The Guestbook stack ships with its own monitoring (see [`guestbook-new/`](guestbook-new/) and [`devops-notes/12-monitoring.md`](devops-notes/12-monitoring.md)):
+
+- **Prometheus** scrapes the API, `redis-exporter`, `node-exporter` and itself every 15 seconds and keeps 15 days of data.
+- **Grafana** is provisioned from files: the Prometheus data source (fixed `uid`) and the `Guestbook` dashboard (service availability, Redis memory and clients, disk usage, CPU, free RAM). Nothing has to be clicked together after a fresh start.
+- Metrics and monitoring traffic use their own Compose networks (`metrics`, `monitoring`), separate from the application networks. Grafana is published on `127.0.0.1` only.
+- On the VPS the same stack is rolled out by the `deploy` workflow and Ansible (configs copied, services restarted when configs change, Grafana health checked); Grafana is reached through an SSH tunnel.
 
 ## Deployment
 
@@ -54,8 +67,9 @@ internet ──443──> Caddy (HTTPS, Let's Encrypt) ──> frontend (nginx, 
 - **HTTPS:** [Caddy](https://caddyserver.com/) runs on the host, obtains and renews the TLS certificate automatically and proxies traffic to the frontend container, which is bound to `127.0.0.1` only.
 - **Caddyfile:** generated by Ansible from a Jinja2 template; Caddy is reloaded by a handler when the config changes.
 - **Images:** pulled from GHCR, pinned by commit SHA.
-- **Delivery:** the `deploy` workflow (run by hand with a commit SHA) uses a dedicated SSH key and Ansible to roll that exact version out; rolling back means running it again with an older SHA. Secrets live in GitHub Secrets, and the server pulls images with the short-lived `GITHUB_TOKEN` of the run.
+- **Delivery:** the `deploy` workflow (run by hand with a commit SHA) uses a dedicated SSH key and Ansible to roll that exact version out; rolling back means running it again with an older SHA. Secrets (`DEPLOY_SSH_KEY`, `REDIS_PASSWORD`, `GRAFANA_ADMIN_PASSWORD`) live in GitHub Secrets and are passed to Ansible as variables at run time; the server pulls images with the short-lived `GITHUB_TOKEN` of the run.
 - **Firewall:** UFW allows only SSH, 80 and 443.
+- **Monitoring on the server:** the same playbook copies `prometheus/` and `grafana/` next to the compose file, restarts Prometheus and Grafana only when their configs changed (bind-mounted files are not picked up by `compose up`) and waits for Grafana's health endpoint. Grafana listens on `127.0.0.1:3000` only (not proxied by Caddy, not opened in UFW); to look at it, use an SSH tunnel. The API's metrics port is never routed through Nginx, and the deploy workflow checks that `/api/metrics` returns 404 on the public domain.
 
 ## CI/CD and automation
 
@@ -64,7 +78,7 @@ All workflows live in [`.github/workflows/`](.github/workflows/). Project workfl
 | Workflow | Trigger | What it does |
 |----------|---------|--------------|
 | **guestbook-ci** | push to `main` and pull requests touching `guestbook-new/` | Lint (hadolint), validate Compose, build, smoke test through Nginx, Trivy image scan, publish to GHCR on `main` |
-| **deploy** | manual (`workflow_dispatch`) with a commit SHA | Checks that images for that SHA exist in GHCR, connects to the VPS over SSH, runs the Ansible deploy playbook and checks the site over HTTPS; rollback = run it again with an older SHA |
+| **deploy** | manual (`workflow_dispatch`) with a commit SHA | Checks that images for that SHA exist in GHCR, connects to the VPS over SSH, runs the Ansible deploy playbook (app, `.env`, Prometheus and Grafana configs), checks the site over HTTPS and that metrics are not reachable through the public domain; rollback = run it again with an older SHA |
 | **todo-ci** | push to `main` and pull requests touching `archive_projects/docker-compose2/` | Lint (hadolint), validate Compose, build, smoke test on `/health` (checks the app and PostgreSQL together), logs on failure, cleanup |
 | **security** | every push and pull request | Scans the full git history for leaked secrets with gitleaks |
 | **schedule-scan** | weekly (Monday, cron) and manually | Rebuilds the Guestbook and Todo API images and scans them with Trivy, so new CVEs in base images and dependencies are found even without code changes |
@@ -98,7 +112,8 @@ All workflows live in [`.github/workflows/`](.github/workflows/). Project workfl
 - **Git workflow:** feature branches, pull requests, resolving merge conflicts and divergent branches
 - **Deployment:** deploying a container image to a cloud platform (Render); manual deployment of a Compose stack to a VPS from GHCR images pinned by commit SHA; free domain (DuckDNS) with automatic HTTPS through Caddy
 - **Configuration management:** Ansible playbooks, templates (Jinja2) and handlers for repeatable server setup
-- **CD:** manual-trigger deploy workflow with a dedicated CI SSH key, GitHub Secrets and variables, image existence check before deploy, end-to-end HTTPS check, rollback by commit SHA
+- **CD:** manual-trigger deploy workflow with a dedicated CI SSH key, GitHub Secrets and variables, image existence check before deploy, end-to-end HTTPS check, a negative check that metrics are not exposed publicly, rollback by commit SHA
+- **Monitoring:** Prometheus (scrape config, `up`, PromQL basics: `rate`, aggregations, label selectors), exporters for Redis and the host, Grafana provisioning of data sources and dashboards from files (dashboards as code), separate Compose networks for metrics traffic
 - **Security hygiene:** keeping secrets out of Git, GitHub push protection, least-privilege setups
 
 ## Roadmap
@@ -116,8 +131,9 @@ All workflows live in [`.github/workflows/`](.github/workflows/). Project workfl
 - [x] Domain and HTTPS (Caddy, free DuckDNS domain)
 - [x] Continuous delivery: deploy to the server from GitHub Actions (SSH key for CI, Ansible), rollback by commit SHA
 - [x] Automate server setup and deployment with Ansible (server setup and app deployment playbooks, tested on a fresh VPS)
+- [x] Monitoring with Prometheus and Grafana (exporters, provisioned data source and dashboard, deployed to the VPS by the same Ansible playbook)
+- [ ] Alerting (Prometheus alert rules, Alertmanager)
 - [ ] Provision infrastructure with Terraform
-- [ ] Monitoring with Prometheus and Grafana
 - [ ] Kubernetes basics (k3s / minikube)
 
 ## Repository layout
@@ -128,12 +144,14 @@ All workflows live in [`.github/workflows/`](.github/workflows/). Project workfl
 │   ├── workflows/              # guestbook-ci, todo-ci, security, schedule-scan, deploy
 │   └── dependabot.yml          # automatic dependency update PRs
 ├── guestbook-new/              # main project (own README inside)
+│   ├── prometheus/             # Prometheus scrape config
+│   └── grafana/                # provisioning (data source, dashboard provider) and dashboard JSON
 ├── archive_projects/
 │   ├── docker_compose_frontend/   # Guestbook v1
 │   ├── docker-compose2/           # Todo API
 │   ├── flask-app2/                # Catnip
 │   └── smart-backup/              # Smart Backup
-├── ansible/                    # playbooks: server setup (site.yml, incl. Caddy) and app deployment (deploy.yml)
+├── ansible/                    # playbooks: server setup (site.yml, incl. Caddy) and app deployment incl. monitoring configs (deploy.yml)
 ├── devops-notes/               # personal reference notes and Docker practice tasks
 └── README.md
 ```

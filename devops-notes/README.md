@@ -1,6 +1,6 @@
 # Справочник DevOps-инженера
 
-Личный справочник по Git, Linux, сетям, безопасности, автоматизации, Docker и CI/CD.
+Личный справочник по Git, Linux, сетям, безопасности, автоматизации, Docker, CI/CD и мониторингу.
 
 Окружение: ПК со второй ОС, VS Code + WSL (Ubuntu) + Bash + Git.
 
@@ -19,3 +19,4 @@
 | [09-interview-questions.md](09-interview-questions.md) | Вопросы для собеседований по Docker и CI |
 | [10-vps-setup.md](10-vps-setup.md) | Первичная настройка VPS по шагам: вход по ключу, пользователь `deploy`, hardening `sshd`, UFW, обход UFW в Docker, установка Docker, keepalive и `tmux` против обрывов SSH, ручной деплой из GHCR, обновление и откат по sha, чек-лист для пересоздания почасового VPS, каталог ошибок |
 | [11-ansible.md](11-ansible.md) | Ansible: принцип работы, идемпотентность, сравнение с CI, compose, bash и Terraform, inventory и плейбук, модули, шпаргалка команд, vault, каталог ошибок |
+| [12-monitoring.md](12-monitoring.md) | Мониторинг: Prometheus, Grafana, экспортеры (redis, node), pull-модель, `prometheus.yml`, шпаргалка PromQL, provisioning источника данных и дашбордов из файлов, сети в Compose, деплой мониторинга на сервер через Ansible и GitHub Actions (секреты, перезапуск при смене конфигов, доступ к Grafana через SSH-туннель), каталог ошибок |

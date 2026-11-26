@@ -2,13 +2,15 @@
 
 [![guestbook-ci](https://github.com/wertyjonio/develop-devOps/actions/workflows/guestbook-ci.yml/badge.svg)](https://github.com/wertyjonio/develop-devOps/actions/workflows/guestbook-ci.yml)
 
-A small multi-container web app built to practice Docker, Docker Compose and CI/CD. Visitors can leave messages in a guestbook; the page also shows a visit counter and the live health of the backend.
+A small multi-container web app built to practice Docker, Docker Compose, CI/CD and monitoring. Visitors can leave messages in a guestbook; the page also shows a visit counter and the live health of the backend.
 
-It runs three containers:
+The application runs in three containers:
 
 - **frontend**: a Vite single-page app, built in a multi-stage Docker build and served by **Nginx**, which also acts as a reverse proxy for the API
 - **api**: a **Node.js (Express)** REST API
 - **redis**: **Redis** as the data store
+
+Next to them runs a monitoring stack: **Prometheus**, **Grafana**, **redis-exporter** and **node-exporter** (see [Monitoring](#monitoring)).
 
 ```
 browser ──HTTPS──> Caddy (host, production only)
@@ -17,18 +19,24 @@ browser ──HTTPS──> Caddy (host, production only)
                    frontend (nginx) ──/api/──> api (node :3000) ──> redis (:6379)
                    published on                 internal only        internal only
                    127.0.0.1:8080
+
+prometheus ──scrapes──> api (:9100), redis-exporter (:9121), node-exporter (:9100)
+    │
+    └──> grafana (published on 127.0.0.1:3000)
 ```
 
-Locally you open the frontend directly on `http://localhost:8080`; on the server Caddy sits in front of it and terminates HTTPS (see [HTTPS and domain](#https-and-domain-production)).
+Locally you open the frontend directly on `http://localhost:8080` and Grafana on `http://localhost:3000`; on the server Caddy sits in front of the frontend and terminates HTTPS (see [HTTPS and domain](#https-and-domain-production)).
 
-Two Compose networks keep the services apart:
+Four Compose networks keep the services apart:
 
-| Network   | Members           | Purpose |
-|-----------|-------------------|---------|
-| `edge`    | frontend, api     | Nginx proxies requests to the API |
-| `backend` | api, redis        | the API talks to the database |
+| Network      | Members                                                  | Purpose |
+|--------------|----------------------------------------------------------|---------|
+| `edge`       | frontend, api                                            | Nginx proxies requests to the API |
+| `backend`    | api, redis, redis-exporter (`internal: true`)            | the API and the exporter talk to the database; no way out |
+| `metrics`    | api, redis-exporter, node-exporter, prometheus           | Prometheus scrapes metrics |
+| `monitoring` | prometheus, grafana (`internal: true`)                   | Grafana queries Prometheus |
 
-The frontend and Redis share no network, so the frontend cannot reach the database even if it is compromised.
+The frontend and Redis share no network, so the frontend cannot reach the database even if it is compromised. Prometheus cannot reach Redis directly either: it only sees the exporters and the API on `metrics`.
 
 ## Features
 
@@ -37,8 +45,9 @@ The frontend and Redis share no network, so the frontend cannot reach the databa
 - Visit counter stored in Redis
 - Live status indicator (API and Redis health)
 - Two client-side routes (`/` and `/about`), so refreshing a deep link works thanks to the SPA fallback in the Nginx config
-- Only the frontend publishes a port, and by default only on `127.0.0.1`; the API and Redis are reachable only inside the Compose networks
+- Only the frontend (and Grafana) publish ports, and by default only on `127.0.0.1`; the API, Redis and Prometheus are reachable only inside the Compose networks
 - Redis is password-protected and its data survives restarts (named volume + AOF persistence)
+- Monitoring out of the box: metrics for the API, Redis and the host, and a provisioned Grafana dashboard
 
 ## Tech stack
 
@@ -47,6 +56,7 @@ The frontend and Redis share no network, so the frontend cannot reach the databa
 - **Database:** Redis 7.4
 - **Web server / proxy:** Nginx
 - **HTTPS / reverse proxy (production):** Caddy
+- **Monitoring:** Prometheus, Grafana, redis_exporter, node-exporter
 - **Infrastructure:** Docker, Docker Compose
 - **CI/CD:** GitHub Actions, GitHub Container Registry, hadolint, Trivy, gitleaks
 
@@ -71,6 +81,16 @@ The frontend and Redis share no network, so the frontend cannot reach the databa
 │   └── src/
 │       ├── main.js
 │       └── style.css
+├── prometheus/
+│   └── prometheus.yml      # scrape targets, scrape interval
+├── grafana/
+│   ├── dashboards/
+│   │   └── guestbook.json  # the dashboard, exported from Grafana
+│   └── provisioning/
+│       ├── datasources/
+│       │   └── datasources.yml   # Prometheus data source (fixed uid)
+│       └── dashboards/
+│           └── dashboards.yml    # tells Grafana where to load dashboards from
 ├── docker-compose.yml
 ├── .env.example
 ├── .gitignore
@@ -89,11 +109,11 @@ The frontend and Redis share no network, so the frontend cannot reach the databa
 git clone <repository-url>
 cd <project-folder>
 
-cp .env.example .env        # then set your own REDIS_PASSWORD in .env
+cp .env.example .env        # then set your own REDIS_PASSWORD and GRAFANA_ADMIN_PASSWORD in .env
 docker compose up -d --build
 ```
 
-Open **http://localhost:8080** (the host port is set in `docker-compose.yml`).
+Open **http://localhost:8080** for the app and **http://localhost:3000** for Grafana (user `admin`, password from `GRAFANA_ADMIN_PASSWORD`).
 
 Check the status:
 
@@ -101,26 +121,27 @@ Check the status:
 docker compose ps
 ```
 
-`redis` and `api` should be `healthy`; `frontend` should be `running`.
+`redis`, `api`, `prometheus` and `grafana` should be `healthy`; `frontend` should be `running` (or `healthy`).
 
 ### Stop
 
 ```bash
 docker compose down        # stop and remove containers, keep the data
-docker compose down -v     # also delete the Redis volume (all messages)
+docker compose down -v     # also delete all volumes (messages, metrics history, Grafana data)
 ```
 
 ## Configuration
 
 The API and Redis read their settings from environment variables, provided through `.env` (template: `.env.example`). The `.env` file is ignored by git.
 
-| Variable         | Description                                                      | Example in `.env.example` |
-|------------------|------------------------------------------------------------------|---------------------------|
-| `PORT`           | port the API listens on inside the container                     | `3000`                    |
-| `REDIS_HOST`     | Redis hostname (the Compose service name)                        | `redis`                   |
-| `REDIS_PORT`     | Redis port                                                       | `6379`                    |
-| `REDIS_PASSWORD` | password for Redis, shared by Redis and the API                  | `change_me`               |
-| `BIND_ADDR`      | optional: host address the frontend port is bound to (default `127.0.0.1`; set `0.0.0.0` to expose it on your network) | not set |
+| Variable                 | Description                                                      | Example in `.env.example` |
+|--------------------------|------------------------------------------------------------------|---------------------------|
+| `PORT`                   | port the API listens on inside the container                     | `3000`                    |
+| `REDIS_HOST`             | Redis hostname (the Compose service name)                        | `redis`                   |
+| `REDIS_PORT`             | Redis port                                                       | `6379`                    |
+| `REDIS_PASSWORD`         | password for Redis, shared by Redis, the API and the exporter    | `change_me`               |
+| `GRAFANA_ADMIN_PASSWORD` | password of the Grafana `admin` user (Compose refuses to start without it) | `change_me`     |
+| `BIND_ADDR`              | optional: host address the frontend port is bound to (default `127.0.0.1`; set `0.0.0.0` to expose it on your network) | not set |
 
 If you change `PORT`, update `proxy_pass` in `frontend/nginx.conf` as well.
 
@@ -154,27 +175,64 @@ curl localhost:8080/api/messages
 
 | Service    | Image / build | Notes |
 |------------|---------------|-------|
-| `frontend` | built from `./frontend` | Multi-stage build: the first stage (Node) installs dependencies and runs `vite build`; the final stage contains only Nginx and the built `dist/` files, with no Node.js. Nginx runs as a non-root user, serves the static files, falls back to `index.html` for client-side routes (`try_files $uri $uri/ /index.html`) and forwards `/api/` to the `api` service (reverse proxy). It is the only service with a published port. Starts after the API is healthy. |
-| `api`      | built from `./api` | Express app running as the unprivileged `node` user. The final image contains no npm. Configuration comes from `.env`. A healthcheck calls `/health`. Starts only after Redis reports `healthy`. |
+| `frontend` | built from `./frontend` | Multi-stage build: the first stage (Node) installs dependencies and runs `vite build`; the final stage contains only Nginx and the built `dist/` files, with no Node.js. Nginx runs as a non-root user, serves the static files, falls back to `index.html` for client-side routes (`try_files $uri $uri/ /index.html`) and forwards `/api/` to the `api` service (reverse proxy). It is the only application service with a published port. Starts after the API is healthy. |
+| `api`      | built from `./api` | Express app running as the unprivileged `node` user. The final image contains no npm. Configuration comes from `.env`. A healthcheck calls `/health`. Starts only after Redis reports `healthy`. Exposes metrics on a separate port (9100) inside the `metrics` network. |
 | `redis`    | `redis:7.4-alpine` | Runs as a non-root user with `--appendonly yes` and a password. Data lives in the `redis-data` named volume mounted at `/data`. A healthcheck tells Compose when it is ready. |
 
-Startup order: `redis` (healthy) -> `api` (healthy) -> `frontend`.
+Startup order: `redis` (healthy) -> `api` (healthy) -> `frontend`. The monitoring stack starts after the services it scrapes: `prometheus` waits for `api` and `redis-exporter`, `grafana` waits for a healthy `prometheus`.
 
 Dockerfile practices used here: dependencies are installed before the source is copied (so the layer cache is reused), `npm ci` for reproducible installs, multi-stage builds, `.dockerignore` files to keep `node_modules`, `.env` and build output out of the images, and an unprivileged user in every final image.
+
+## Monitoring
+
+| Service          | Image                          | Role |
+|------------------|--------------------------------|------|
+| `prometheus`     | `prom/prometheus`              | scrapes targets every 15 s, stores 15 days of metrics in the `prometheus-data` volume |
+| `grafana`        | `grafana/grafana`              | dashboards; published on `127.0.0.1:3000` only |
+| `redis-exporter` | `oliver006/redis_exporter`     | turns Redis internals into Prometheus metrics (reads the password from `.env`) |
+| `node-exporter`  | `prom/node-exporter`           | host metrics: disk, CPU, memory |
+
+Prometheus scrape targets (`prometheus/prometheus.yml`): `prometheus` itself, `api:9100`, `redis-exporter:9121` and `node-exporter:9100`. Targets are addressed by Compose service name inside the `metrics` network, so none of these ports is published on the host.
+
+### Grafana is configured from files
+
+Nothing in Grafana has to be clicked together after a fresh start:
+
+- `grafana/provisioning/datasources/datasources.yml` creates the Prometheus data source with a fixed `uid: prometheus`. The dashboard JSON refers to that uid; without a fixed one Grafana would generate a random uid on every fresh start and the panels would show "datasource not found".
+- `grafana/provisioning/dashboards/dashboards.yml` makes Grafana load every JSON file from `/etc/grafana/dashboards` (mounted from `grafana/dashboards/`).
+- `grafana/dashboards/guestbook.json` is the **Guestbook** dashboard: service availability (`up`), Redis memory, connected Redis clients, disk usage, CPU load and free RAM.
+
+Both folders are mounted read-only. To change the dashboard: edit it in the Grafana UI, **Export → Export as JSON** (with "Export the dashboard to use in another instance" turned off) and overwrite `guestbook.json`.
+
+### Checks
+
+```bash
+# are all scrape targets up?
+docker compose exec prometheus wget -qO- 'http://127.0.0.1:9090/api/v1/targets' | grep -o '"health":"[a-z]*"'
+
+# metrics of the API
+docker compose exec api wget -qO- http://127.0.0.1:9100/metrics | head -20
+```
+
+In Grafana, **Explore** with the query `up` should show one series per target, all with the value `1`.
+
+Note: `node-exporter` reports the machine it runs on. Under WSL2 that is the WSL virtual machine, not Windows; on the VPS it is the server itself.
 
 ## Security hardening
 
 Applied to the services in `docker-compose.yml`:
 
-- **Non-root:** no container runs its main process as root.
+- **Non-root:** application containers do not run their main process as root.
 - **No capabilities:** `cap_drop: [ALL]` removes all extra Linux capabilities; `no-new-privileges` prevents privilege escalation through setuid binaries.
-- **Read-only root filesystem:** `read_only: true`, with a `tmpfs` for `/tmp` where a service needs scratch space; Redis writes only to its data volume.
+- **Read-only root filesystem:** `read_only: true` where the service allows it, with a `tmpfs` for `/tmp` where a service needs scratch space; Redis writes only to its data volume.
 - **Resource limits:** memory and CPU limits per container, so a leak or a runaway process cannot take down the host.
 - **Log rotation:** `json-file` logs are capped (10 MB x 3 files per container), so logs cannot fill the disk.
-- **Network segmentation:** separate `edge` and `backend` networks; Redis is not reachable from the frontend.
-- **Minimal exposure:** only the frontend publishes a port, bound to `127.0.0.1` by default (Docker bypasses host firewalls like UFW for published ports, so a public server exposes it through a reverse proxy: Caddy, see below).
+- **Network segmentation:** separate `edge`, `backend`, `metrics` and `monitoring` networks; Redis is not reachable from the frontend or from Prometheus, and the `backend` and `monitoring` networks are `internal`.
+- **Minimal exposure:** only the frontend and Grafana publish ports, both bound to `127.0.0.1` (Docker bypasses host firewalls like UFW for published ports, so a public server exposes the app through a reverse proxy: Caddy, see below). Prometheus and the exporters publish nothing.
+- **Required secrets:** Compose fails with a clear message if `REDIS_PASSWORD` or `GRAFANA_ADMIN_PASSWORD` is not set (`${VAR:?message}`).
 - **`init: true`** for the API, so signals are forwarded and zombie processes are reaped.
 - **Secrets stay out of the repo:** `.env` is git-ignored, `.env.example` holds safe placeholders.
+- **Pinned versions:** the monitoring images use fixed version tags, not `latest`.
 
 ## HTTPS and domain (production)
 
@@ -184,6 +242,7 @@ On the VPS, Caddy runs on the host and terminates HTTPS in front of the stack:
 - Caddy obtains a Let's Encrypt certificate automatically and renews it
 - Caddy proxies requests to `127.0.0.1:8080`, where the frontend container listens
 - the application containers are never exposed to the internet directly; UFW allows only SSH, 80 and 443
+- Grafana is bound to `127.0.0.1:3000` and is not proxied; to look at it on the server, use an SSH tunnel: `ssh -L 3000:127.0.0.1:3000 <user>@<server>` and open `http://localhost:3000`
 
 The `Caddyfile` is generated by Ansible from a template (`Caddyfile.j2`), and Caddy is reloaded by a handler when it changes:
 
@@ -214,7 +273,11 @@ The `guestbook-ci` workflow runs on every push and pull request that touches thi
 5. **Scan** the images with Trivy; fixable HIGH and CRITICAL vulnerabilities fail the pipeline.
 6. **Publish** (only on pushes to `main`, after everything above passes): push the images to GitHub Container Registry as `guestbook-api` and `guestbook-frontend`, tagged `latest` and with the commit SHA.
 
-A separate `security` workflow scans the whole git history for leaked secrets with gitleaks. CI uses the template values from `.env.example`, and publishing uses the built-in short-lived `GITHUB_TOKEN`, so no real secrets are stored in the pipeline.
+A separate `security` workflow scans the whole git history for leaked secrets with gitleaks. CI uses the template values from `.env.example` (including `GRAFANA_ADMIN_PASSWORD`, which Compose requires), and publishing uses the built-in short-lived `GITHUB_TOKEN`, so no real secrets are stored in the pipeline.
+
+### Deployment
+
+The manual `deploy` workflow rolls a commit SHA out to the VPS with Ansible. The playbook copies `docker-compose.yml`, `prometheus/` and `grafana/` to the server, renders `.env` from a template (`REDIS_PASSWORD` and `GRAFANA_ADMIN_PASSWORD` come from GitHub Secrets), starts the stack from GHCR images, restarts Prometheus and Grafana when their config files changed, and waits for the API (through Nginx) and Grafana to answer their health checks. Finally the workflow checks the public site over HTTPS and that `/api/metrics` returns 404 on the domain, i.e. the API's metrics port is not routed to the internet.
 
 ## Local development (frontend)
 
@@ -237,9 +300,11 @@ The dev server runs on http://localhost:5173 and proxies `/api` to the Nginx con
   docker compose exec redis sh -c 'redis-cli -a "$REDIS_PASSWORD" --no-auth-warning lrange messages 0 -1'
   ```
 - **Failure behavior:** run `docker compose stop redis`, watch the status indicator turn red and read `docker compose logs api`. Run `docker compose start redis` and the app recovers on its own.
-- **Isolation:** `curl localhost:3000` from the host should fail, because the API port is not published.
+- **Watch it in Grafana:** with `redis` stopped, the `redis_up` series drops to 0 and the availability panel changes; start Redis again and it recovers.
+- **Dashboards as code:** `docker compose down -v && docker compose up -d`. After about 30 seconds the Guestbook dashboard is back with working panels, created from files only.
+- **Isolation:** `curl localhost:9090` (Prometheus) and `curl localhost:9121/metrics` (redis-exporter) fail from the host, because they publish no ports. Port 3000 on the host is Grafana, not the API; the API is reachable only through Nginx at `/api/`.
 - **Network segmentation:** try to resolve Redis from the frontend, for example `docker compose exec frontend getent hosts redis` (it fails), then run the same command in `api` (it succeeds).
-- **Non-root:** `docker compose top` shows the user of every process; none of them is `root`.
+- **Non-root:** `docker compose top` shows the user of every process; the application containers do not run as `root`.
 - **Read-only filesystem:** `docker compose exec api touch /app/test.txt` fails with `Read-only file system`, while `touch /tmp/test.txt` works because `/tmp` is a `tmpfs`.
 - **Resource usage:** `docker stats --no-stream` shows memory use against the configured limits.
 
@@ -248,10 +313,12 @@ The dev server runs on http://localhost:5173 and proxies `/api` to the Nginx con
 ```bash
 docker compose logs -f api         # follow the API logs
 docker compose logs frontend       # Nginx logs
+docker compose logs grafana | grep -i provisioning   # did Grafana load the provisioned files?
 docker compose up -d --build       # rebuild images after code changes
 docker compose config              # validate and print the final configuration
 docker compose top                 # processes and the users they run as
 docker compose exec frontend nginx -t   # check the Nginx config
+docker compose restart prometheus  # after editing prometheus.yml
 ```
 
 ## Troubleshooting
@@ -265,6 +332,14 @@ docker compose exec frontend nginx -t   # check the Nginx config
 - **Redis fails to start with a permission error on `/data`:** the volume was created with a different owner; recreate it with `docker compose down -v` (this deletes the data).
 - **404 after refreshing `/about`:** the SPA fallback in `nginx.conf` is missing or wrong.
 - **Red status indicator on the page:** the API cannot reach Redis; check `REDIS_HOST` and `REDIS_PASSWORD` in `.env` and make sure Redis is `healthy`.
+- **`port is already allocated` for the frontend:** an older stack or another process holds port 8080. Find it with `docker ps --filter "publish=8080"` (or `sudo lsof -i :8080`) and stop it.
+- **`GRAFANA_ADMIN_PASSWORD is not set`:** add it to `.env` (the template is `.env.example`).
+- **Grafana does not open on `127.0.0.1:3000`:** `docker compose ps grafana` must show `127.0.0.1:3000->3000/tcp`. Docker does not publish ports of containers that sit only in `internal` networks, so Grafana also needs a network without `internal`.
+- **I changed `prometheus.yml` or the dashboard on the server, but nothing changed:** `docker compose up` does not recreate a container when only a bind-mounted file changed. The deploy playbook restarts Prometheus and Grafana in that case; by hand: `docker compose restart prometheus grafana`.
+- **Grafana dashboard is missing after start:** `docker compose logs grafana | grep -i provisioning`; usual causes are a wrong `path` in `dashboards.yml`, invalid JSON, or the file not being in `grafana/dashboards/`.
+- **Panels say "datasource not found":** the datasource `uid` in the dashboard JSON is not `prometheus`; fix it in the JSON and make sure `datasources.yml` sets `uid: prometheus`.
+- **A scrape target is `down` (or "No data" in Explore):** check `scrapeUrl` and `lastError` in the Prometheus targets API (see the checks above); usual causes are a wrong service name or port in `prometheus.yml`. Give Prometheus a minute after a fresh start.
+- **node-exporter fails with `path / is mounted on / but it is not a shared or slave mount`:** drop `rslave` from the bind mount (`/:/host:ro`); it does not work under WSL2.
 - **Caddy does not get a certificate:** check that the DuckDNS record points to the current server IP, that ports 80 and 443 are open in UFW, and read `journalctl -u caddy`.
 - **`502` from the domain but the app works locally:** Caddy cannot reach `127.0.0.1:8080`; make sure the stack is running and `BIND_ADDR` is not changed.
 
@@ -277,9 +352,12 @@ docker compose exec frontend nginx -t   # check the Nginx config
 - Caddy as an HTTPS reverse proxy with automatic certificates and a free DuckDNS domain
 - passing a secret through every layer (`.env`, Compose, application code, healthcheck)
 - container hardening: non-root users, dropped capabilities, read-only filesystems, resource limits, network segmentation
+- monitoring: Prometheus scraping, exporters, PromQL, Grafana dashboards provisioned from files
 - a CI/CD pipeline: linting, build, smoke test, vulnerability and secret scanning, publishing images to a registry
 
 ## Ideas for next steps
 
-- deploy to the VPS automatically from GitHub Actions, with rollback by commit tag
-- add monitoring with Prometheus and Grafana
+- alerting: Prometheus alert rules (target down, disk almost full, Redis memory) and Alertmanager
+- per-container metrics with cAdvisor, and request rate and latency panels for the API
+- logs in Grafana with Loki and Promtail
+- put Grafana behind Caddy with authentication (on the VPS it is reachable only through an SSH tunnel for now)
